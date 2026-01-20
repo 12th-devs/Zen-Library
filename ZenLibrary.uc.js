@@ -1484,7 +1484,7 @@
     position: absolute;
     inset: 0;
     display: block; 
-    padding: 16px;
+    padding: 16px 18px;
     box-sizing: border-box;
     overflow-y: auto; 
     overflow-x: hidden;
@@ -1506,7 +1506,7 @@
 }
 
 .media-masonry-wrapper {
-    column-width: 200px; 
+    column-width: 210px; 
     column-gap: 16px;
     width: 100%;
 }
@@ -1661,14 +1661,17 @@
     background: transparent !important; /* Fix "It has background" issue */
     background-image: none !important;
     mask-image: none !important;
-    width: auto !important;
-    height: auto !important;
+    width: 64px !important;
+    height: 64px !important;
+    opacity: 0.2;
 }
 
 /* Ensure the SVG inside gets correct sizing if needed */
 .empty-icon.media-icon svg {
     display: block;
     margin: 0 auto;
+    width: 64px !important;
+    height: 64px !important;
 }
 `;
 
@@ -1748,18 +1751,43 @@ zen-library, #zen-library-container {
             return Math.min(total, window.innerWidth * 0.8);
         }
         static calculateMediaWidth(count) {
-            // Logic:
-            // 0-3 items: 1 column
-            // 4+ items: 2+ columns (User prefers wider grid even for few items)
-            const minCols = count <= 3 ? 1 : (count <= 15 ? 2 : 4);
-            const total = 90 + 32 + (minCols * 220); // Column width ~220px + gaps
-            return Math.min(total, window.innerWidth * 0.6);
+            // Default width for loading/empty states
+            if (count === undefined || count === null || count === 0) return 340;
+
+            const maxAllowedWidth = window.innerWidth * 0.6;
+            const sidebar = 90;
+            const padding = 36; // 18px each side to match 340px total
+            const colWidth = 210;
+            const gap = 16;
+            const scrollbarBuffer = 4; // Width of our custom scrollbar
+
+            // 1. Determine desired columns based on count (User thresholds)
+            let desiredCols = 1;
+            if (count > 4) desiredCols = 2;
+            if (count > 10) desiredCols = 3;
+
+            // 2. Helper to calculate width for N columns
+            const getWidthForCols = (n) => sidebar + padding + (n * colWidth) + ((n - 1) * gap) + scrollbarBuffer;
+
+            // 3. Scale down desiredCols if it exceeds 60% viewport
+            let finalCols = desiredCols;
+            while (finalCols > 1 && getWidthForCols(finalCols) > maxAllowedWidth) {
+                finalCols--;
+            }
+
+            // 4. Return exact width for those columns
+            return getWidthForCols(finalCols);
         }
         static calculateMediaColumns(width) {
-            // Heuristic to set column-count based on available width
-            // sidebar is ~90px.
-            const avail = width - 90 - 40; // approx padding
-            return Math.max(1, Math.floor(avail / 220));
+            const sidebar = 90;
+            const padding = 36;
+            const colWidth = 210;
+            const gap = 16;
+            const scrollbarBuffer = 4;
+
+            const avail = width - sidebar - padding - scrollbarBuffer;
+            // Precise column calculation matching width logic
+            return Math.max(1, Math.floor((avail + gap + 2) / (colWidth + gap)));
         }
         static getData() {
             const ws = this.getWorkspaces();
@@ -2317,9 +2345,9 @@ zen-library, #zen-library-container {
             const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
             const loading = this.el("div", { className: "empty-state library-content-fade-in" });
 
-            // Use correct Media Icon SVG (Film Strip)
+            // Use correct Media Icon SVG (Film Strip) - Consistent 64x64
             const iconSvg = `
-<svg class="empty-icon media-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 40px; height: 40px; margin-bottom: 8px;">
+<svg class="empty-icon media-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
  <path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
  </svg>`;
             const iconContainer = this.el("div");
@@ -2364,25 +2392,23 @@ zen-library, #zen-library-container {
                 return true;
             });
 
-            // Track count for dynamic sizing
-            const prevCount = this._mediaItemCount || 0;
-            const totalMediaCount = downloads.filter(d => {
-                const ext = d.filename.split('.').pop().toLowerCase();
-                return IMAGE_EXTS.includes(ext) || VIDEO_EXTS.includes(ext);
-            }).length;
-
-            this._mediaItemCount = totalMediaCount; // Use total count for width stability
+            // Use FILTERED count for reactive width adjustments
+            const prevCount = this._mediaItemCount;
+            this._mediaItemCount = mediaItems.length;
             window.gZenLibraryMediaCount = this._mediaItemCount;
 
             if (this._mediaItemCount !== prevCount) {
-                // Trigger width recalculation
-                if (this.update) requestAnimationFrame(() => this.update());
+                if (this.update) this.update();
             }
+
 
             if (mediaItems.length === 0) {
                 this._mediaContainer.innerHTML = "";
                 const emptyState = this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon media-icon" }),
+                    this.el("div", {
+                        className: "empty-icon media-icon",
+                        innerHTML: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+                    }),
                     this.el("h3", { textContent: this._mediaSearchTerm ? "No matching media" : "No media found" }),
                     this.el("p", { textContent: this._mediaSearchTerm ? "Try a different search term." : "We couldn't find any images or videos in your downloads." })
                 ]);
@@ -2397,11 +2423,25 @@ zen-library, #zen-library-container {
                 return tsB - tsA;
             });
 
-            const masonryWrapper = this.el("div", { className: "media-masonry-wrapper" });
-            const grid = this.el("div", { className: "media-grid" }, [masonryWrapper]);
+            const masonryWrapper = this.el("div", {
+                className: "media-masonry-wrapper",
+                style: `column-count: ${ZenLibrarySpaces.calculateMediaColumns(parseFloat(this.style.getPropertyValue("--zen-library-width")) || 340)};`
+            });
+            const grid = this._mediaContainer;
+            grid.innerHTML = "";
+            grid.appendChild(masonryWrapper);
 
-            this._mediaContainer.innerHTML = "";
-            this._mediaContainer.appendChild(grid);
+            // Smooth vertical scrolling mirroring Spaces UI
+            grid.onwheel = (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    if (e.deltaMode === 1) { // Line-based (Mouse Wheel)
+                        grid.scrollBy({ top: e.deltaY * 30, behavior: "smooth" });
+                    } else { // Pixel-based (Trackpad)
+                        grid.scrollTop += e.deltaY * 2;
+                    }
+                }
+            };
 
             const fragment = document.createDocumentFragment();
 
@@ -2690,8 +2730,6 @@ zen-library, #zen-library-container {
 
                 if (this._historySearchTerm) {
                     groupLabel = "Search Results";
-                } else if (timeMs >= this._sessionStart) {
-                    groupLabel = "Recently Visited (Session)";
                 } else {
                     const d = new Date(timeMs);
                     d.setHours(0, 0, 0, 0);
@@ -2757,16 +2795,16 @@ zen-library, #zen-library-container {
                 const { workspaces, width } = ZenLibrarySpaces.getData();
                 let targetWidth = 340;
 
+                const startWidthStyle = this.style.getPropertyValue("--zen-library-start-width");
+                const startWidth = startWidthStyle ? parseInt(startWidthStyle) : 0;
+
                 if (this.activeTab === "spaces") {
                     targetWidth = width;
                 } else if (this.activeTab === "media") {
-                    // Start with default or last known; renderMediaList() will trigger re-update
-                    const count = window.gZenLibraryMediaCount || this._mediaItemCount || 0;
+                    const count = window.gZenLibraryMediaCount ?? 0;
                     targetWidth = ZenLibrarySpaces.calculateMediaWidth(count);
                 }
 
-                const startWidthStyle = this.style.getPropertyValue("--zen-library-start-width");
-                const startWidth = startWidthStyle ? parseInt(startWidthStyle) : 0;
                 const offset = targetWidth - startWidth;
 
                 this.style.setProperty("--zen-library-width", `${targetWidth}px`);
