@@ -590,7 +590,7 @@
     display: flex;
     align-items: center;
     padding: 0; 
-    margin: 0 8px 8px 8px; /* Added 8px bottom margin for spacing */
+    margin: 0 16px 8px 16px; /* Aligned with media-grid 16px padding */
     gap: 0;
     width: auto;
     outline: none !important;
@@ -1478,6 +1478,198 @@
 .empty-icon.media-icon {
     mask-image: url("chrome://global/skin/media/audio.svg"); /* Fallback guess */
 }
+
+/* Media Grid - Pinterest Style */
+.media-grid {
+    position: absolute;
+    inset: 0;
+    display: block; 
+    padding: 16px;
+    box-sizing: border-box;
+    overflow-y: auto; 
+    overflow-x: hidden;
+    scrollbar-width: auto;
+    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+.media-grid::-webkit-scrollbar { 
+    width: 4px; 
+}
+
+.media-grid::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.media-grid::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+.media-masonry-wrapper {
+    column-width: 200px; 
+    column-gap: 16px;
+    width: 100%;
+}
+
+
+.media-card {
+    /* Full-bleed Minimalist Vibe */
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
+    border: none;
+    border-radius: var(--border-radius-medium);
+    /* Use clip-path instead of overflow:hidden to fix Gecko's backdrop-filter bug */
+    overflow: hidden;
+    break-inside: avoid;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    margin-bottom: 16px; 
+    padding: 0; 
+    transform: translateZ(0);
+}
+
+/* Hover Backdrop Overlay - Darkens the whole card */
+.media-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    transition: background 0.2s ease;
+    z-index: 1;
+    pointer-events: none;
+    border-radius: inherit;
+}
+
+.media-card:hover::after {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.media-card:active {
+    opacity: 0.9;
+}
+
+/* Use a wrapper for the image to handle aspect ratio/sizing cleanly */
+.media-preview-container {
+    width: 100%;
+    margin: 0;
+    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.05));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    color: #fff;
+    font-size: 10px;
+    min-height: 120px;
+    border-radius: var(--border-radius-medium); /* Manual rounding since parent has no overflow:hidden */
+}
+
+.media-card img, .media-card video {
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+    object-fit: cover; 
+    display: block;
+    transition: opacity 0.3s;
+    z-index: 0;
+}
+
+.media-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 12px; 
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: light-dark(
+        color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+        color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%)
+    );
+    color: inherit !important; /* Match library UI text color */
+    opacity: 0;
+    transform: translateY(10px); 
+    transition: transform 0.2s var(--zen-library-easing), opacity 0.2s var(--zen-library-easing);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.media-card:hover .media-info {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.media-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.media-title {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-meta, .media-time {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.video-duration-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    z-index: 2;
+    transition: opacity 0.2s;
+}
+
+
+.media-glance-info {
+    padding: 16px 20px;
+    background: rgba(20, 20, 20, 0.8);
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.media-glance-title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 20px;
+}
+
+/* FORCE override for loading icon to show SVG */
+.empty-icon.media-icon {
+    background: transparent !important; /* Fix "It has background" issue */
+    background-image: none !important;
+    mask-image: none !important;
+    width: auto !important;
+    height: auto !important;
+}
+
+/* Ensure the SVG inside gets correct sizing if needed */
+.empty-icon.media-icon svg {
+    display: block;
+    margin: 0 auto;
+}
 `;
 
     const GLOBAL_CSS = `
@@ -1507,6 +1699,37 @@
     /* Negative translate for right side */
     transform: translateX(calc(-1 * var(--zen-library-offset, 0px))) !important;
 }
+
+
+/* Fix Native Glance Layering & Position */
+.browserSidebarContainer.zen-glance-overlay {
+    /* Native glance lives inside the translated wrapper. 
+       We must pull the ENTIRE overlay back so it's not clipped by the wrapper's translation. */
+    translate: calc(-1 * var(--zen-library-offset, 0px)) 0;
+    transition: translate 0.5s var(--zen-library-easing);
+
+}
+
+:root[zen-right-side="true"] .browserSidebarContainer.zen-glance-overlay {
+    translate: var(--zen-library-offset, 0px) 0;
+}
+
+/* CRITICAL: Prevent clipping when translated back */
+:root:has(.zen-glance-overlay) #zen-appcontent-wrapper,
+:root:has(.zen-glance-overlay) #browser {
+    overflow: visible !important;
+}
+
+zen-library, #zen-library-container {
+    opacity: 1;
+    transition: opacity 0.2s ease !important;
+}
+
+/* Ensure Library stays below the Glance overlay and matches native dimming */
+:root:has(.zen-glance-overlay:not([fade-out="true"])) #zen-library-container {
+    opacity: 0.4 !important;
+}
+
 :root.zen-toolbox-fading-in #navigator-toolbox {
     animation: zen-fade-in 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
 }
@@ -1524,11 +1747,28 @@
             const total = 90 + 40 + (count * 240) + ((count - 1) * 16);
             return Math.min(total, window.innerWidth * 0.8);
         }
+        static calculateMediaWidth(count) {
+            // Logic:
+            // 0-3 items: 1 column
+            // 4+ items: 2+ columns (User prefers wider grid even for few items)
+            const minCols = count <= 3 ? 1 : (count <= 15 ? 2 : 4);
+            const total = 90 + 32 + (minCols * 220); // Column width ~220px + gaps
+            return Math.min(total, window.innerWidth * 0.6);
+        }
+        static calculateMediaColumns(width) {
+            // Heuristic to set column-count based on available width
+            // sidebar is ~90px.
+            const avail = width - 90 - 40; // approx padding
+            return Math.max(1, Math.floor(avail / 220));
+        }
         static getData() {
             const ws = this.getWorkspaces();
             return { workspaces: ws, width: ws.length ? this.calculatePanelWidth(ws.length) : 340 };
         }
     }
+
+    // Cache for media count to prevent width jump
+    window.gZenLibraryMediaCount = window.gZenLibraryMediaCount || 0;
 
     class ZenLibraryElement extends HTMLElement {
         constructor() {
@@ -1544,7 +1784,8 @@
             this._historyItems = [];
             this._renderedItems = [];
             this._historySearchTerm = "";
-            this._downloadsSearchTerm = ""; // Initialize to empty string
+            this._downloadsSearchTerm = "";
+            this._mediaSearchTerm = ""; // Media search state
             this._historyBatchSize = 30; // Reduced for smoother first render
             this._isHistoryLoading = false;
             this._renderedCount = 0;
@@ -2055,12 +2296,204 @@
             this._downloadsContainer.appendChild(this.el("div", { className: "history-bottom-spacer" }));
         }
 
+        renderMedia() {
+            // Main wrapper
+            const wrapper = this.el("div", {
+                className: "library-list-wrapper"
+            });
+            const container = this.el("div", { className: "media-grid" });
+            wrapper.appendChild(container);
+            this._mediaContainer = container;
+
+            // Reuse fetchDownloads but we'll filter it
+            const startLoading = () => {
+                this.fetchDownloads().then(downloads => {
+                    this.renderMediaList(downloads);
+                    this._mediaContainer.classList.add("library-content-fade-in");
+                    setTimeout(() => this._mediaContainer.classList.add("scrollbar-visible"), 100);
+                });
+            };
+
+            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
+            const loading = this.el("div", { className: "empty-state library-content-fade-in" });
+
+            // Use correct Media Icon SVG (Film Strip)
+            const iconSvg = `
+<svg class="empty-icon media-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 40px; height: 40px; margin-bottom: 8px;">
+ <path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+ </svg>`;
+            const iconContainer = this.el("div");
+            iconContainer.innerHTML = iconSvg;
+            loading.appendChild(iconContainer.firstElementChild);
+
+            loading.appendChild(this.el("h3", { textContent: "Gathering media..." }));
+            loading.appendChild(this.el("p", { textContent: "Looking for your downloaded images and videos." }));
+
+            container.appendChild(loading);
+
+            const delay = isTransitioning ? 400 : 250;
+            setTimeout(() => {
+                const l = container.querySelector(".empty-state");
+                if (l) l.remove();
+                startLoading();
+            }, delay);
+
+            return wrapper;
+        }
+
+        renderMediaList(downloads) {
+            if (!this._mediaContainer) return;
+            this._mediaContainer.innerHTML = "";
+            this._mediaContainer.classList.add("scrollbar-visible");
+
+            const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp"];
+            const VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov"];
+
+            const mediaItems = downloads.filter(d => {
+                // Filter by extension AND valid download status (not deleted/failed)
+                if (d.status === "deleted" || d.status === "failed") return false;
+
+                const ext = d.filename.split('.').pop().toLowerCase();
+                const isMedia = IMAGE_EXTS.includes(ext) || VIDEO_EXTS.includes(ext);
+                if (!isMedia) return false;
+
+                // Search Filter
+                if (this._mediaSearchTerm && !d.filename.toLowerCase().includes(this._mediaSearchTerm.toLowerCase())) {
+                    return false;
+                }
+                return true;
+            });
+
+            // Track count for dynamic sizing
+            const prevCount = this._mediaItemCount || 0;
+            const totalMediaCount = downloads.filter(d => {
+                const ext = d.filename.split('.').pop().toLowerCase();
+                return IMAGE_EXTS.includes(ext) || VIDEO_EXTS.includes(ext);
+            }).length;
+
+            this._mediaItemCount = totalMediaCount; // Use total count for width stability
+            window.gZenLibraryMediaCount = this._mediaItemCount;
+
+            if (this._mediaItemCount !== prevCount) {
+                // Trigger width recalculation
+                if (this.update) requestAnimationFrame(() => this.update());
+            }
+
+            if (mediaItems.length === 0) {
+                this._mediaContainer.innerHTML = "";
+                const emptyState = this.el("div", { className: "empty-state" }, [
+                    this.el("div", { className: "empty-icon media-icon" }),
+                    this.el("h3", { textContent: this._mediaSearchTerm ? "No matching media" : "No media found" }),
+                    this.el("p", { textContent: this._mediaSearchTerm ? "Try a different search term." : "We couldn't find any images or videos in your downloads." })
+                ]);
+                this._mediaContainer.appendChild(emptyState);
+                return;
+            }
+
+            // Sort by normalization timestamp
+            mediaItems.sort((a, b) => {
+                const tsA = typeof a.timestamp === 'number' ? (a.timestamp > 1e14 ? a.timestamp / 1000 : a.timestamp) : a.timestamp.getTime();
+                const tsB = typeof b.timestamp === 'number' ? (b.timestamp > 1e14 ? b.timestamp / 1000 : b.timestamp) : b.timestamp.getTime();
+                return tsB - tsA;
+            });
+
+            const masonryWrapper = this.el("div", { className: "media-masonry-wrapper" });
+            const grid = this.el("div", { className: "media-grid" }, [masonryWrapper]);
+
+            this._mediaContainer.innerHTML = "";
+            this._mediaContainer.appendChild(grid);
+
+            const fragment = document.createDocumentFragment();
+
+            mediaItems.forEach(item => {
+                const ext = item.filename.split('.').pop().toLowerCase();
+                const isVideo = VIDEO_EXTS.includes(ext);
+                const fileUrl = "file://" + item.targetPath;
+
+                const card = this.el("div", {
+                    className: "media-card",
+                    onclick: (e) => this.showMediaGlance(item, e),
+                    title: item.filename
+                });
+
+                const previewContainer = this.el("div", { className: "media-preview-container" });
+
+                if (isVideo) {
+                    const videoEl = this.el("video", {
+                        src: fileUrl,
+                        preload: "metadata",
+                        muted: true
+                    });
+                    previewContainer.appendChild(videoEl);
+
+                    // Add duration badge - top left
+                    const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
+                    videoEl.addEventListener("loadedmetadata", () => {
+                        const mins = Math.floor(videoEl.duration / 60);
+                        const secs = Math.floor(videoEl.duration % 60);
+                        durationBadge.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                    });
+                    previewContainer.appendChild(durationBadge);
+                } else {
+                    const imgEl = this.el("img", {
+                        src: fileUrl,
+                        loading: "lazy",
+                    });
+                    previewContainer.appendChild(imgEl);
+                }
+
+                // Format timestamp
+                let timeStr = "";
+                try {
+                    let ts = item.timestamp;
+                    if (ts instanceof Date) ts = ts.getTime();
+                    if (typeof ts === 'number' && ts > 1e14) ts = ts / 1000;
+                    const date = new Date(ts);
+                    timeStr = date.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " +
+                        date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
+                } catch (e) { }
+
+                const info = this.el("div", { className: "media-info" }, [
+                    this.el("div", { className: "media-title", textContent: item.filename }),
+                    this.el("div", { className: "media-meta-row" }, [
+                        this.el("div", { className: "media-meta", textContent: this.formatBytes(item.size) }),
+                        this.el("div", { className: "media-time", textContent: timeStr })
+                    ])
+                ]);
+
+                card.appendChild(previewContainer);
+                card.appendChild(info);
+                fragment.appendChild(card);
+            });
+
+            masonryWrapper.appendChild(fragment);
+        }
+
+        showMediaGlance(item, event) {
+            const fileUrl = "file://" + item.targetPath;
+            if (window.gZenGlanceManager) {
+                // Close previous if any to allow switching
+                if (window.gZenGlanceManager.closeGlance) {
+                    window.gZenGlanceManager.closeGlance();
+                }
+
+                const rect = event.currentTarget.getBoundingClientRect();
+                window.gZenGlanceManager.openGlance({
+                    url: fileUrl,
+                    clientX: rect.left,
+                    clientY: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                });
+            }
+        }
+
         handleDownloadAction(item, action) {
             try {
                 const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
                 file.initWithPath(item.targetPath);
 
-                if (action === "open") {
+                if (action === "open-external") {
                     if (file.exists()) file.launch();
                     else alert("File does not exist.");
                 } else if (action === "show") {
@@ -2322,7 +2755,15 @@
         update() {
             try {
                 const { workspaces, width } = ZenLibrarySpaces.getData();
-                const targetWidth = this.activeTab === "spaces" ? width : 340;
+                let targetWidth = 340;
+
+                if (this.activeTab === "spaces") {
+                    targetWidth = width;
+                } else if (this.activeTab === "media") {
+                    // Start with default or last known; renderMediaList() will trigger re-update
+                    const count = window.gZenLibraryMediaCount || this._mediaItemCount || 0;
+                    targetWidth = ZenLibrarySpaces.calculateMediaWidth(count);
+                }
 
                 const startWidthStyle = this.style.getPropertyValue("--zen-library-start-width");
                 const startWidth = startWidthStyle ? parseInt(startWidthStyle) : 0;
@@ -2348,7 +2789,7 @@
                         const searchInput = this.el("input", {
                             type: "text",
                             placeholder: `Search ${this.activeTab.charAt(0).toUpperCase() + this.activeTab.slice(1)}...`,
-                            value: this.activeTab === "history" ? this._historySearchTerm : (this.activeTab === "downloads" ? this._downloadsSearchTerm : ""),
+                            value: this.activeTab === "history" ? this._historySearchTerm : (this.activeTab === "downloads" ? this._downloadsSearchTerm : (this.activeTab === "media" ? this._mediaSearchTerm : "")),
                             oninput: (e) => {
                                 if (this.activeTab === "history") {
                                     this._historySearchTerm = e.target.value;
@@ -2356,6 +2797,9 @@
                                 } else if (this.activeTab === "downloads") {
                                     this._downloadsSearchTerm = e.target.value;
                                     this.fetchDownloads().then(downloads => this.renderDownloadsList(downloads));
+                                } else if (this.activeTab === "media") {
+                                    this._mediaSearchTerm = e.target.value;
+                                    this.fetchDownloads().then(downloads => this.renderMediaList(downloads));
                                 }
                             }
                         });
@@ -2443,6 +2887,12 @@
                         const downloadsEl = this.renderDownloads();
                         content.innerHTML = "";
                         content.appendChild(downloadsEl);
+                    }
+                } else if (this.activeTab === "media") {
+                    if (!content.querySelector(".media-grid") || tabChanged) {
+                        const mediaEl = this.renderMedia();
+                        content.innerHTML = "";
+                        content.appendChild(mediaEl);
                     }
                 } else {
                     content.innerHTML = `<div class="empty-state library-content-fade-in">
@@ -3261,6 +3711,7 @@
                     document.documentElement.removeAttribute("zen-library-open");
                     document.documentElement.removeAttribute("zen-library-open-compact");
                     document.documentElement.style.removeProperty("--zen-library-offset"); // Cleanup
+                    document.documentElement.removeAttribute("zen-media-glance-active");
 
                     if (wasNormalOpen) {
                         document.documentElement.classList.add("zen-toolbox-fading-in");
