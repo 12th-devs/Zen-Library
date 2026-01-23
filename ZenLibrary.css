@@ -1,0 +1,1872 @@
+:host {
+    /* :library-root */
+    --zen-library-width: 340px;
+    --zen-library-sidebar-width: 90px;
+    --zen-library-easing: cubic-bezier(0.4, 0, 0.2, 1);
+
+    display: block;
+    height: 100%;
+    /* LOCK WIDTH to start-width so browser layout doesn't shrink webview */
+    width: var(--zen-library-start-width, 0px) !important;
+    min-height: 0;
+
+    --tab-label-mask-size: 2em;
+    --zen-folder-front-bgcolor: light-dark(color-mix(in srgb, var(--zen-primary-color), white 70%), color-mix(in srgb, var(--zen-primary-color), black 40%));
+    --zen-folder-behind-bgcolor: light-dark(color-mix(in srgb, var(--zen-primary-color) 60%, gray), color-mix(in srgb, var(--zen-primary-color) 60%, #c1c1c1));
+    --zen-folder-stroke: light-dark(color-mix(in srgb, var(--zen-primary-color) 50%, black), color-mix(in srgb, var(--zen-primary-color) 15%, #ebebeb));
+}
+
+.zen-library-container {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+:host([right-side]) .zen-library-container {
+    flex-direction: row-reverse;
+}
+
+/* LIST VIEW STYLES (Refactored from History) */
+.library-list-wrapper {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.library-list-panes {
+    display: flex;
+    flex: 1;
+    width: 200%;
+    transition: transform 0.25s var(--zen-library-easing);
+    will-change: transform;
+}
+
+.history-pane {
+    width: 50%;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+}
+
+.library-list-container,
+.library-closed-windows-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    /* Hidden by default */
+    padding: 0;
+}
+
+.scrollbar-visible {
+    scrollbar-width: auto !important;
+    /* Normal width as requested */
+}
+
+/* Custom WebKit Scrollbar (applied to list containers and spaces grid) */
+.library-list-container::-webkit-scrollbar,
+.library-workspace-grid::-webkit-scrollbar,
+.library-closed-windows-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.library-list-container::-webkit-scrollbar-thumb,
+.library-workspace-grid::-webkit-scrollbar-thumb,
+.library-closed-windows-container::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.library-list-container::-webkit-scrollbar-track,
+.library-workspace-grid::-webkit-scrollbar-track,
+.library-closed-windows-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+.library-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    height: 40px;
+    margin: 0 8px;
+    border-radius: var(--border-radius-medium);
+    cursor: pointer;
+    transition: all 0.2s;
+    /* Sync with workspace item */
+    position: relative;
+    user-select: none;
+    flex-shrink: 0;
+    opacity: 0.9;
+    /* Sync with workspace item */
+    box-sizing: border-box;
+}
+
+.library-list-item:hover {
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
+}
+
+.library-list-item:active {
+    transform: scale(0.98);
+}
+
+.library-list-item .item-icon-container {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.library-list-item .item-icon {
+    width: 16px;
+    height: 16px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.library-list-item .item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.library-list-item .item-title {
+    font-size: 13px;
+    /* Match Spaces UI */
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.95;
+}
+
+/* Strikethrough for deleted downloads */
+.library-list-item.deleted .item-title {
+    text-decoration: line-through;
+    opacity: 0.5;
+}
+
+.library-list-item.deleted .item-icon-container {
+    opacity: 0.4;
+}
+
+.library-list-item .item-url {
+    font-size: 10px;
+    /* Slightly smaller to fit 40px height */
+    opacity: 0.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: -1px;
+    /* Tighter spacing */
+}
+
+.library-list-item .item-time {
+    font-size: 9px;
+    opacity: 0.35;
+    font-variant-numeric: tabular-nums;
+    margin-left: 0;
+    /* Removed manual margin gap */
+    flex-shrink: 0;
+    display: block;
+}
+
+/* Hover Interaction: Timestamp <-> Folder Icon */
+.library-list-item:hover .item-time {
+    display: none;
+}
+
+.library-list-item .item-folder-icon {
+    display: none;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0.6;
+    margin-right: -4px;
+    /* Align slightly right */
+}
+
+.library-list-item:hover .item-folder-icon {
+    display: flex;
+}
+
+.library-list-item .item-folder-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+    opacity: 1;
+}
+
+.library-list-item .item-folder-icon svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+
+.library-list-item .item-folder-icon.disabled {
+    opacity: 0.2;
+    cursor: default;
+    pointer-events: none;
+}
+
+.library-list-item .item-folder-icon.disabled:hover {
+    background: transparent;
+}
+
+:host(.closing) {
+    /* No special width needed, offset animation handles exit */
+}
+
+@keyframes blockSlideIn {
+    from {
+        transform: translateX(-90px);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+@keyframes popInItem {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.library-list-item.pop-in {
+    animation: popInItem 0.4s var(--zen-library-easing) backwards;
+}
+
+@keyframes blockSlideOut {
+    from {
+        transform: translateX(0);
+    }
+
+    to {
+        transform: translateX(-90px);
+    }
+}
+
+@keyframes contentFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes blockSlideInRight {
+    from {
+        transform: translateX(90px);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+@keyframes blockSlideOutRight {
+    from {
+        transform: translateX(0);
+    }
+
+    to {
+        transform: translateX(90px);
+    }
+}
+
+@keyframes contentFadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+#zen-library-sidebar-container {
+    width: var(--zen-library-sidebar-width);
+    min-width: var(--zen-library-sidebar-width);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 15px 0 6px 0;
+    box-sizing: border-box;
+    box-shadow: 0 0 16px rgba(0, 0, 0, 0.15);
+    border-right: 1px solid var(--zen-border-color, rgba(129, 129, 129, 0.1));
+    z-index: 2;
+    position: relative;
+    background: transparent !important;
+    animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
+}
+
+:host([right-side]) #zen-library-sidebar-container {
+    border-right: none;
+    border-left: 1px solid var(--zen-border-color, rgba(129, 129, 129, 0.1));
+    animation-name: blockSlideInRight;
+}
+
+:host(.closing) #zen-library-sidebar-container {
+    animation: blockSlideOut 0.15s var(--zen-library-easing) both;
+}
+
+:host([right-side].closing) #zen-library-sidebar-container {
+    animation-name: blockSlideOutRight;
+}
+
+#zen-library-sidebar-container .sidebar-items {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+.sidebar-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    /* Increased gap between icon and label */
+    cursor: pointer;
+    width: 76px;
+    padding: 10px 0;
+    border-radius: var(--border-radius-medium);
+    opacity: 0.6;
+}
+
+.sidebar-button:hover {
+    opacity: 0.75;
+    background: var(--tab-hover-background-color, rgba(255, 255, 255, 0.1));
+}
+
+.sidebar-button.active {
+    opacity: 0.8;
+    background: rgba(255, 255, 255, 0.15);
+    font-weight: 600;
+}
+
+.sidebar-button .icon {
+    width: 32px;
+    height: 32px;
+    transition: transform 0.3s var(--zen-library-easing);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar-button .icon svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.sidebar-button.active .icon {
+    /* Static selection: no scale or displacement */
+}
+
+.sidebar-button .icon path,
+.sidebar-button .icon rect,
+.sidebar-button .icon circle {
+    transition: all 0.3s var(--zen-library-easing);
+    vector-effect: non-scaling-stroke;
+}
+
+.sidebar-button .label {
+    font-size: 11px;
+    /* Increased from 10px */
+    text-align: center;
+    font-weight: 600 !important;
+    opacity: 0.9;
+    margin-top: 2px;
+}
+
+.sidebar-button.active .label {
+    font-weight: 800 !important;
+    opacity: 1;
+}
+
+/* Idle state: 0.7 opacity for all SVG elements */
+.sidebar-button .icon {
+    opacity: 0.7;
+    transition: opacity 0.3s var(--zen-library-easing);
+}
+
+.sidebar-button.active .icon {
+    opacity: 1;
+}
+
+.sidebar-button.active .icon circle,
+.sidebar-button.active .icon .front-rect,
+.sidebar-button.active .icon .back-rect {
+    fill-opacity: 1 !important;
+}
+
+/* Mountain always visible */
+.media-icon .mountain {
+    fill-opacity: 0.7;
+}
+
+.sidebar-button.active .media-icon .mountain {
+    fill-opacity: 1 !important;
+}
+
+.sidebar-button-exit {
+    margin-top: auto;
+}
+
+
+.back-icon {
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='19' y1='12' x2='5' y2='12'%3E%3C/line%3E%3Cpolyline points='12 19 5 12 12 5'%3E%3C/polyline%3E%3C/svg%3E");
+    background-color: currentColor !important;
+    width: 24px !important;
+    height: 24px !important;
+}
+
+#zen-library-main-panel {
+    /* Explicitly sizing because host is visually collapsed (0px/small) */
+    width: calc(var(--zen-library-width) - var(--zen-library-sidebar-width));
+    min-width: 250px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0 0 0;
+    /* 16px top, 0px horizontal/bottom */
+    box-sizing: border-box;
+    z-index: 1;
+    animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
+    /* CRITICAL: Do not shrink, allow overflow out of host */
+    flex-shrink: 0;
+    flex-grow: 0;
+    min-height: 0;
+    /* Prevention of flex expansion */
+}
+
+:host([right-side]) #zen-library-main-panel {
+    animation-name: blockSlideInRight;
+}
+
+:host([active-tab="spaces"]) #zen-library-main-panel {
+    padding: 0;
+}
+
+:host(.closing) #zen-library-main-panel {
+    animation: blockSlideOut 0.15s var(--zen-library-easing) both;
+}
+
+:host([right-side].closing) #zen-library-main-panel {
+    animation-name: blockSlideOutRight;
+}
+
+.library-header,
+.library-content {
+    opacity: 0;
+    animation: contentFadeIn 0.2s ease-in both;
+}
+
+:host(.closing) .library-header,
+:host(.closing) .library-content {
+    animation: contentFadeOut 0.15s ease-in both;
+}
+
+.library-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+    /* Prevention of flex expansion */
+}
+
+.library-content-fade-in {
+    animation: contentFadeIn 0.3s var(--zen-library-easing);
+}
+
+@keyframes contentFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes emptyStateFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 0.7;
+        transform: translateY(0);
+    }
+}
+
+.library-list-wrapper {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.library-list-panes {
+    display: flex;
+    flex: 1;
+    width: 200%;
+    transition: transform 0.25s var(--zen-library-easing);
+    will-change: transform;
+}
+
+.history-pane {
+    width: 50%;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+}
+
+.library-list-container,
+.library-closed-windows-container {
+    flex: 1;
+    overflow-y: hidden;
+    /* Hide by default to prevent 1px lines */
+    overflow-x: hidden;
+    padding: 0;
+}
+
+.scrollbar-visible {
+    scrollbar-width: auto !important;
+    /* Restore native width */
+    overflow-y: auto !important;
+    /* Only scroll when visible */
+}
+
+.view-switcher-container {
+    display: flex;
+    align-items: center;
+    padding: 4px 16px;
+    margin-bottom: 4px;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    user-select: none;
+}
+
+.view-switcher-container:hover {
+    opacity: 1;
+}
+
+.view-switcher-arrow {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-down.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    transition: transform 0.3s var(--zen-library-easing);
+}
+
+.panes-shifted .view-switcher-arrow {
+    transform: rotate(-90deg);
+}
+
+.panes-shifted .library-list-panes {
+    transform: translateX(-50%);
+}
+
+.history-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Match library-list-item */
+    padding: 0 8px;
+    /* Match library-list-item */
+    height: 40px;
+    /* Match library-list-item */
+    cursor: pointer;
+    transition: all 0.2s var(--zen-library-easing);
+    border-radius: var(--border-radius-medium);
+    margin: 0 8px;
+    /* Match library-list-item */
+    color: var(--ws-text-color);
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.history-nav-item:hover {
+    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.08));
+}
+
+.history-nav-item .nav-icon {
+    width: 16px;
+    /* Match history favicon size */
+    height: 16px;
+    /* Match history favicon size */
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    opacity: 0.8;
+}
+
+.history-nav-item .nav-label {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.history-nav-item .nav-arrow {
+    width: 16px;
+    height: 16px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-right.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    opacity: 0.5;
+}
+
+.history-back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    margin-bottom: 0px;
+    /* Reduced from 8px */
+}
+
+.history-back-button:hover {
+    opacity: 1;
+}
+
+.history-back-button .back-arrow {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-left.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+.history-separator {
+    height: 1px;
+    background: currentColor;
+    opacity: 0.1;
+    margin: 4px 16px;
+    /* Tighter margins */
+}
+
+.search-container {
+    background: var(--zen-toolbar-element-bg) !important;
+    border-radius: var(--border-radius-medium);
+    display: flex;
+    align-items: center;
+    padding: 0;
+    margin: 0 16px 8px 16px;
+    /* Aligned with media-grid 16px padding */
+    gap: 0;
+    width: auto;
+    outline: none !important;
+    overflow: hidden;
+    position: relative;
+    height: 40px;
+}
+
+.search-container input {
+    background: none;
+    border: none;
+    flex: 1;
+    font-size: 13.5px;
+    outline: none;
+    padding-left: 8px;
+    padding-right: 4px;
+    height: 100%;
+    color: inherit;
+}
+
+.search-icon-wrapper {
+    width: 40px;
+    /* Match height */
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+
+.search-icon {
+    width: 18px;
+    height: 18px;
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    background-color: currentColor;
+    opacity: 0.5;
+}
+
+.search-container input {
+    background: none;
+    border: none;
+    flex: 1;
+    font-size: 15px;
+    outline: none;
+}
+
+.empty-state {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    height: 100%;
+    width: 100%;
+}
+
+
+
+.empty-state h3 {
+    font-size: 22px;
+    font-weight: 600;
+    opacity: 0.5;
+    margin: 0;
+}
+
+.empty-state p {
+    font-size: 14px;
+    opacity: 0.5;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.learn-more {
+    border: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--zen-primary-color, #3b82f6);
+    color: white;
+}
+
+/* SPACES GRID & CARD */
+.library-workspace-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    gap: 16px;
+    padding: 0 20px;
+    align-items: center;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    /* Inheritance of library scrollbar styles */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+.library-workspace-grid::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+    /* Ensure horizontal scrollbar is styled */
+}
+
+.library-workspace-grid::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.library-workspace-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.library-workspace-grid.scrollbar-visible {
+    overflow-x: auto;
+}
+
+
+
+/* Create Workspace Button */
+.library-create-workspace-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    background: light-dark(color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+            color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%));
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.2s ease, transform 0.15s cubic-bezier(0.07, 0.95, 0, 1);
+    opacity: 0.7;
+    color: var(--toolbarbutton-icon-fill, rgba(255, 255, 255, 0.85));
+    margin-left: 2px;
+    /* Shifted back left to feel even with last card spacing */
+}
+
+.library-create-workspace-button:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.library-create-workspace-button:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease-out;
+    opacity: 0.9;
+}
+
+.library-create-workspace-button span {
+    font-size: 22px;
+    font-weight: 300;
+    line-height: 0;
+    /* Align using line-height 0 and small margin */
+    color: inherit;
+    user-select: none;
+    transition: transform 0.2s ease;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: -1.5px;
+    /* Fine-tuned for pixel-perfect centering */
+}
+
+.library-create-workspace-button:active span {
+    transform: scale(0.95);
+}
+
+.library-workspace-card {
+    width: 240px;
+    min-width: 240px;
+    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    max-height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    flex-shrink: 0;
+    flex-grow: 0;
+    margin: 0;
+    border-radius: var(--border-radius-medium);
+    padding: 8px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--ws-gradient, var(--zen-primary-color));
+    color: var(--ws-text-color, inherit);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    contain: strict;
+    /* Isolation from layout changes */
+    transition: opacity 0.3s var(--zen-library-easing), transform 0.3s var(--zen-library-easing);
+}
+
+.library-workspace-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("chrome://browser/content/zen-images/grain-bg.png");
+    opacity: var(--ws-grain, 0);
+    pointer-events: none;
+    mix-blend-mode: overlay;
+}
+
+.library-workspace-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    z-index: 2;
+    /* Staying above grain/overlay */
+    padding: 6px 10px;
+    /* Reduced top/bottom padding by 4px */
+    opacity: 0.9;
+    flex-shrink: 0;
+}
+
+.library-workspace-separator-container {
+    margin: 8px 10px;
+    display: flex;
+    align-items: center;
+}
+
+.library-workspace-icon-container {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.8;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    /* If it's an image SVG, use mask to apply theme color */
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+.library-workspace-icon-text {
+    font-size: 16px;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-icon-empty {
+    width: 100%;
+    height: 100%;
+    border: 1px dashed var(--ws-text-color);
+    border-radius: 4px;
+    opacity: 0.5;
+}
+
+.library-workspace-name {
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ws-text-color);
+}
+
+/* SPACES UI ITEMS - Adopted from Nebula */
+.library-workspace-card-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+    min-height: 0;
+}
+
+.library-workspace-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: var(--tab-inline-padding);
+    min-height: var(--tab-min-height);
+    margin-block: 4px;
+    margin-bottom: 2px;
+    border-radius: var(--border-radius-medium) !important;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px;
+    opacity: 0.9;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.library-workspace-item:hover {
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
+}
+
+.library-workspace-item.selected {
+    background: var(--ws-tab-selected-color, rgba(255, 255, 255, 0.12));
+    box-shadow: var(--ws-tab-selected-shadow, none);
+}
+
+.library-workspace-item .item-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.library-workspace-item .item-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+    direction: ltr;
+    mask-image: linear-gradient(to left, transparent, black var(--tab-label-mask-size));
+    transition: mask-image 0.15s ease;
+}
+
+.library-workspace-item:hover .item-label {
+    /* Occlude text behind the close button */
+    mask-image: linear-gradient(to left, transparent 32px, black 44px);
+}
+
+.library-workspace-item.folder .item-label {
+    font-weight: 600 !important;
+}
+
+.library-tab-close-button {
+    position: absolute;
+    right: 6px;
+    /* Moved 2px more to the right */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius-small, 4px);
+    opacity: 0;
+    pointer-events: none;
+    cursor: pointer;
+    background: transparent;
+    color: var(--ws-text-color, inherit);
+    transition: all 0.15s ease;
+}
+
+.library-tab-close-button .icon-mask {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -moz-context-properties: fill, stroke;
+}
+
+.library-tab-close-button.unpin .icon-mask {
+    mask-image: url("chrome://browser/skin/zen-icons/unpin.svg");
+}
+
+.library-tab-close-button.close .icon-mask {
+    mask-image: url("chrome://browser/skin/zen-icons/close.svg") !important;
+}
+
+.library-workspace-item:hover .library-tab-close-button {
+    opacity: 0.7;
+    pointer-events: auto;
+}
+
+.library-tab-close-button:hover {
+    opacity: 1 !important;
+    background: var(--ws-tab-hover-color, rgba(128, 128, 128, 0.3));
+}
+
+
+/* FOLDER STYLES - Exact copy from Nebula */
+.library-workspace-folder {
+    flex-shrink: 0;
+    /* Prevention of layout shift */
+    width: 100%;
+}
+
+.library-workspace-folder.collapsed>.library-workspace-folder-content {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+}
+
+.library-workspace-folder-content {
+    margin-inline-start: 16px;
+    transition: max-height 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.1s ease,
+        transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    max-height: 1000px;
+    /* Safe large value for expansion */
+    overflow: hidden;
+}
+
+.library-workspace-separator-container {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 8px 0 0px 2px;
+    /* No right margin to allow separator to reach the edge */
+    position: relative;
+    z-index: 10;
+}
+
+.library-workspace-separator {
+    flex: 1;
+    height: 1px;
+    background: var(--ws-text-color, rgba(255, 255, 255, 0.08));
+    opacity: 0.15;
+    transition: all 0.2s ease;
+}
+
+.library-workspace-cleanup-button {
+    height: 18px;
+    padding: 0;
+    width: 0;
+    opacity: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--ws-text-color);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 500;
+    pointer-events: none;
+    margin-left: 0;
+    transition: opacity 0.2s ease;
+}
+
+.library-workspace-card:hover .library-workspace-cleanup-button {
+    width: 48px;
+    padding: 0 4px;
+    margin-left: 4px;
+    opacity: 0.6;
+    pointer-events: auto;
+}
+
+.library-workspace-cleanup-button:hover {
+    opacity: 1 !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.library-workspace-edit-button {
+    margin-left: auto;
+    cursor: pointer;
+    opacity: 0.7;
+    /* Match drag handle opacity */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 6px;
+    margin-right: -2px;
+    /* Align with right edge like drag handle */
+    transition: opacity 0.2s ease;
+    border-radius: 4px;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-edit-button:hover {
+    opacity: 1;
+    background: transparent;
+    /* Match drag handle hover */
+}
+
+.library-workspace-edit-button div {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 122.88 103.78' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0,103.78c11.7-8.38,30.46.62,37.83-14a16.66,16.66,0,0,0,.62-13.37,10.9,10.9,0,0,0-3.17-4.35,11.88,11.88,0,0,0-2.11-1.35c-9.63-4.78-19.67,1.91-25,10-4.9,7.43-7,16.71-8.18,23.07ZM54.09,43.42a54.31,54.31,0,0,1,15,18.06l50.19-49.16c3.17-3,5-5.53,2.3-10.13A6.5,6.5,0,0,0,117.41,0,7.09,7.09,0,0,0,112.8,1.6L54.09,43.42Zm-16.85,22c2.82,1.52,6.69,5.25,7.61,9.32L65.83,64c-3.78-7.54-8.61-14-15.23-18.58-6.9,9.27-5.5,11.17-13.36,20Z' fill='black' fill-rule='evenodd'/%3E%3C/svg%3E");
+    pointer-events: none;
+}
+
+.library-workspace-cleanup-button::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    background-color: currentColor;
+    mask-image: url("data:image/svg+xml,%3Csvg fill='none' stroke='currentColor' stroke-width='1.5' height='12' width='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 2.75,7.75 6,11 9.25,7.75 M 6,1 v 9.75'/%3E%3C/svg%3E");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+.library-card-footer {
+    padding: 6px 10px;
+    /* Reduced top/bottom padding by 4px */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    opacity: 0.7;
+    border-top: none;
+    margin-top: auto;
+    font-size: 14px;
+    flex-shrink: 0;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-drag-handle {
+    cursor: grab;
+    padding: 6px 8px 8px 8px;
+    /* Balanced padding */
+    margin: -2px -4px -4px -4px;
+    /* Equal visual spacing from edges */
+    border-radius: 4px;
+    transition: opacity 0.2s;
+    user-select: none;
+    font-size: 18px;
+    line-height: 1;
+    opacity: 0.7;
+    /* Match edit button */
+}
+
+.library-workspace-drag-handle:hover {
+    background: transparent;
+    /* Remove background on hover */
+    opacity: 1;
+}
+
+.library-workspace-drag-handle:active {
+    cursor: grabbing;
+}
+
+.library-workspace-grid[dragging-workspace="true"] .library-workspace-card:not([dragged="true"]) {
+    opacity: 0.7;
+    filter: none;
+    pointer-events: none;
+}
+
+/* Ensure placeholder also has sizing and flex properities */
+.library-workspace-card-placeholder {
+    width: 240px;
+    min-width: 240px;
+    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px dashed var(--zen-folder-stroke, rgba(255, 255, 255, 0.3));
+    border-radius: var(--border-radius-medium);
+    flex-shrink: 0;
+    opacity: 0.7;
+    animation: placeholderPopIn 0.3s var(--zen-library-easing) forwards;
+}
+
+@keyframes placeholderPopIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+
+    to {
+        opacity: 0.7;
+        transform: scale(1);
+    }
+}
+
+.library-workspace-card[dragged="true"] {
+    position: fixed !important;
+    z-index: 2 !important;
+    pointer-events: none;
+    transform-origin: center center;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+    opacity: 1 !important;
+    margin: 0 !important;
+    /* Disable transitions while dragged to ensure instant scaling for offset calculation and smooth lerp */
+    transition: none !important;
+    /* User requested: var(--zen-primary-color) as solid base behind gradient */
+    background-color: var(--dragged-bg-color, var(--zen-colors-tertiary, #222)) !important;
+    background-image: none !important;
+    /* Ensure solid base is visible */
+}
+
+/* Layer the gradient on top of the solid primary color */
+.library-workspace-card[dragged="true"]::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: var(--ws-gradient) !important;
+    opacity: 1 !important;
+    z-index: 1 !important;
+    border-radius: inherit;
+}
+
+/* Restore grain/noise visibility on dragged card */
+.library-workspace-card[dragged="true"]::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background-image: url("chrome://browser/content/zen-images/grain-bg.png") !important;
+    opacity: var(--ws-grain, 0.45) !important;
+    pointer-events: none !important;
+    mix-blend-mode: overlay !important;
+    z-index: 2 !important;
+    border-radius: inherit;
+}
+
+.folder-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* FOLDER SVG FIXES - NEBULA EXACT COPY */
+.folder-icon svg {
+    overflow: visible !important;
+    margin-left: -18px;
+
+}
+
+.folder-icon svg image {
+    fill: var(--ws-folder-stroke);
+    -moz-context-properties: fill, fill-opacity;
+}
+
+.folder-icon svg g,
+.folder-icon svg rect,
+.folder-icon svg path {
+    transition: transform 0.3s cubic-bezier(0.42, 0, 0, 1), opacity 0.3s cubic-bezier(0.42, 0, 0, 1);
+}
+
+.folder-icon svg[state='open'] .back {
+    transform: skewX(16deg) translate(-2px, 3.4px) scale(0.85);
+}
+
+.folder-icon svg[state='open'] :is(.front, .dots, .icon) {
+    transform: skewX(-16deg) translate(11.1px, 3.4px) scale(0.85);
+}
+
+/* SPLIT VIEW STYLES - 1:1 with Zen Native */
+.library-split-view-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-block: 4px;
+    margin-inline: 0;
+    border-radius: var(--border-radius-medium);
+    transition: background-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    padding: 0 2px;
+    min-height: var(--tab-min-height);
+}
+
+.library-split-view-group:hover {
+    background: var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08));
+}
+
+.library-split-view-group:has(.selected) {
+    background: var(--ws-tab-selected-color, rgba(255, 255, 255, 0.12));
+    box-shadow: var(--ws-tab-selected-shadow, none);
+}
+
+.library-split-view-group .library-workspace-item {
+    flex: 1;
+    min-width: 0;
+    /* Ensures equal distribution regardless of text length */
+    margin: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding-inline: 8px;
+    justify-content: center;
+}
+
+.library-split-view-group .library-workspace-item .item-label {
+    /* Optional: Hide labels in split view if they are too cramped, 
+       but Zen usually shows them if there's space. 
+       For now, let's keep them and let the mask handles it. */
+}
+
+.library-split-view-group .library-workspace-item:not(:last-child)::after {
+    content: '';
+    width: 1px;
+    height: 16px;
+    background-color: var(--ws-text-color);
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.3;
+    /* Subtle separator */
+}
+
+.library-tab-identity-line {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background-color: var(--identity-tab-color, transparent);
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+.library-split-view-group .library-workspace-item:hover .item-label {
+    mask-image: linear-gradient(to left, transparent 28px, black 40px);
+}
+
+.library-list-container {
+    position: absolute;
+    inset: 0;
+    flex-direction: column;
+    padding: 0;
+    overflow-y: hidden;
+    /* defer to .scrollbar-visible */
+    gap: 4px;
+    /* Slightly tighter gap */
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+.library-list-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.library-list-container::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.library-list-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.history-bottom-spacer {
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.history-section-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.5;
+    margin: 8px 8px 8px 8px;
+    /* 8px horizontal padding */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.history-section-header::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.2;
+}
+
+.library-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    height: 40px;
+    margin: 0 8px;
+    border-radius: var(--border-radius-medium);
+    cursor: pointer;
+    transition: all 0.2s;
+    /* Sync with workspace item */
+    position: relative;
+    user-select: none;
+    flex-shrink: 0;
+    opacity: 0.9;
+    /* Sync with workspace item */
+    box-sizing: border-box;
+}
+
+
+.library-list-item:hover {
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
+}
+
+.library-list-item:active {
+    transform: scale(0.98);
+}
+
+.library-list-item .item-icon-container {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.library-list-item .item-icon {
+    width: 16px;
+    height: 16px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.library-list-item .item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.library-list-item .item-title {
+    font-size: 13px;
+    /* Match Spaces UI */
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.95;
+}
+
+.library-list-item .item-url {
+    font-size: 10px;
+    /* Slightly smaller to fit 40px height */
+    opacity: 0.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: -1px;
+    /* Tighter spacing */
+}
+
+.library-list-item .item-time {
+    font-size: 9px;
+    opacity: 0.35;
+    font-variant-numeric: tabular-nums;
+    margin-left: 0;
+    /* Removed manual margin gap */
+    flex-shrink: 0;
+}
+
+
+/* Hover Interaction: Timestamp <-> Folder Icon */
+.library-list-item:hover .item-time {
+    display: none;
+}
+
+.library-list-item .item-folder-icon {
+    display: none;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0.6;
+    /* Reduced opacity */
+    margin-right: 0;
+    /* Reset manual margin to rely on container padding (8px) */
+    color: var(--ws-text-color, inherit);
+    /* Ensure currentColor is valid */
+}
+
+.library-list-item:hover .item-folder-icon {
+    display: flex;
+}
+
+.library-list-item .item-folder-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+    opacity: 1;
+}
+
+/* Replicate .library-tab-close-button .icon-mask pattern */
+.library-list-item .item-folder-mask {
+    width: 16px;
+    /* Smaller size */
+    height: 16px;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    /* Zen Native "Folder" path (Modified to black for masking) */
+    mask-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 6H12L10 4H4C2.89543 4 2 4.89543 2 6V18C2 19.1046 2.89543 20 4 20H20C21.1046 20 22 19.1046 22 18V8C22 6.89543 21.1046 6 20 6Z' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    padding: 20px;
+    gap: 10px;
+    box-sizing: border-box;
+    animation: emptyStateFadeIn 0.3s var(--zen-library-easing) both;
+}
+
+.empty-state h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 13px;
+    opacity: 0.6;
+    max-width: 250px;
+}
+
+.empty-icon {
+    width: 64px;
+    height: 64px;
+    background-color: currentColor;
+    opacity: 0.2;
+    margin-bottom: 8px;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -moz-context-properties: fill, stroke;
+}
+
+.empty-icon.downloads-icon {
+    mask-image: url("chrome://browser/skin/downloads/downloads.svg");
+}
+
+.empty-icon.history-icon {
+    mask-image: url("chrome://browser/skin/history.svg");
+}
+
+.empty-icon.spaces-icon {
+    mask-image: url("chrome://browser/skin/window.svg");
+}
+
+.empty-icon.media-icon {
+    mask-image: url("chrome://global/skin/media/audio.svg");
+    /* Fallback guess */
+}
+
+/* Media Grid - Pinterest Style */
+.media-grid {
+    position: absolute;
+    inset: 0;
+    display: block;
+    padding: 16px 18px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: auto;
+    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+.media-grid::-webkit-scrollbar {
+    width: 4px;
+}
+
+.media-grid::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.media-grid::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+.media-masonry-wrapper {
+    column-width: 210px;
+    column-gap: 16px;
+    width: 100%;
+}
+
+
+.media-card {
+    /* Full-bleed Minimalist Vibe */
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
+    border: none;
+    border-radius: var(--border-radius-medium);
+    /* Use clip-path instead of overflow:hidden to fix Gecko's backdrop-filter bug */
+    overflow: hidden;
+    break-inside: avoid;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    margin-bottom: 16px;
+    padding: 0;
+    transform: translateZ(0);
+}
+
+/* Hover Backdrop Overlay - Darkens the whole card */
+.media-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    transition: background 0.2s ease;
+    z-index: 1;
+    pointer-events: none;
+    border-radius: inherit;
+}
+
+.media-card:hover::after {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.media-card:active {
+    opacity: 0.9;
+}
+
+/* Use a wrapper for the image to handle aspect ratio/sizing cleanly */
+.media-preview-container {
+    width: 100%;
+    margin: 0;
+    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.05));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    color: #fff;
+    font-size: 10px;
+    min-height: 120px;
+    border-radius: var(--border-radius-medium);
+    /* Manual rounding since parent has no overflow:hidden */
+}
+
+.media-card img,
+.media-card video {
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: opacity 0.3s;
+    z-index: 0;
+}
+
+.media-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: light-dark(color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+            color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%));
+    color: inherit !important;
+    /* Match library UI text color */
+    opacity: 0;
+    transform: translateY(10px);
+    transition: transform 0.2s var(--zen-library-easing), opacity 0.2s var(--zen-library-easing);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.media-card:hover .media-info {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.media-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.media-title {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-meta,
+.media-time {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.video-duration-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    z-index: 2;
+    transition: opacity 0.2s;
+}
+
+
+.media-glance-info {
+    padding: 16px 20px;
+    background: rgba(20, 20, 20, 0.8);
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.media-glance-title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 20px;
+}
+
+/* FORCE override for loading icon to show SVG */
+.empty-icon.media-icon {
+    background: transparent !important;
+    /* Fix "It has background" issue */
+    background-image: none !important;
+    mask-image: none !important;
+    width: 64px !important;
+    height: 64px !important;
+    opacity: 0.2;
+}
+
+/* Ensure the SVG inside gets correct sizing if needed */
+.empty-icon.media-icon svg {
+    display: block;
+    margin: 0 auto;
+    width: 64px !important;
+    height: 64px !important;
+}

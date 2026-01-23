@@ -1,1680 +1,12 @@
+"use strict";
+
 (function () {
     // Cleanup previous instance
     if (window.gZenLibrary && window.gZenLibrary.destroy) {
         window.gZenLibrary.destroy();
     }
 
-    const CSS_CONTENT = `
-:host {
-    --zen-library-width: 340px;
-    --zen-library-sidebar-width: 90px;
-    --zen-library-easing: cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    height: 100%;
-    /* LOCK WIDTH to start-width so browser layout doesn't shrink webview */
-    width: var(--zen-library-start-width, 0px) !important; 
-    flex-direction: row;
-    overflow: visible; /* Allow library to spill out */
-    box-sizing: border-box;
-    min-height: 0; /* Prevention of flex expansion */
-
-    --tab-label-mask-size: 2em;
-    --zen-folder-front-bgcolor: light-dark(color-mix(in srgb, var(--zen-primary-color), white 70%), color-mix(in srgb, var(--zen-primary-color), black 40%));
-    --zen-folder-behind-bgcolor: light-dark(color-mix(in srgb, var(--zen-primary-color) 60%, gray), color-mix(in srgb, var(--zen-primary-color) 60%, #c1c1c1));
-    --zen-folder-stroke: light-dark(color-mix(in srgb, var(--zen-primary-color) 50%, black), color-mix(in srgb, var(--zen-primary-color) 15%, #ebebeb));
-}
-
-/* LIST VIEW STYLES (Refactored from History) */
-.library-list-wrapper {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.library-list-panes {
-    display: flex;
-    flex: 1;
-    width: 200%;
-    transition: transform 0.25s var(--zen-library-easing);
-    will-change: transform;
-}
-
-.history-pane {
-    width: 50%;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    position: relative;
-}
-
-.library-list-container, .library-closed-windows-container {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: none; /* Hidden by default */
-    padding: 0;
-}
-
-.scrollbar-visible {
-    scrollbar-width: auto !important; /* Normal width as requested */
-}
-
-/* Custom WebKit Scrollbar (applied to list containers and spaces grid) */
-.library-list-container::-webkit-scrollbar,
-.library-workspace-grid::-webkit-scrollbar,
-.library-closed-windows-container::-webkit-scrollbar {
-    width: 4px;
-}
-
-.library-list-container::-webkit-scrollbar-thumb,
-.library-workspace-grid::-webkit-scrollbar-thumb,
-.library-closed-windows-container::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, currentColor, transparent 50%);
-    border-radius: 10px;
-}
-
-.library-list-container::-webkit-scrollbar-track,
-.library-workspace-grid::-webkit-scrollbar-track,
-.library-closed-windows-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-
-.library-list-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 8px;
-    height: 40px;
-    margin: 0 8px;
-    border-radius: var(--border-radius-medium);
-    cursor: pointer;
-    transition: all 0.2s; /* Sync with workspace item */
-    position: relative;
-    user-select: none;
-    flex-shrink: 0;
-    opacity: 0.9; /* Sync with workspace item */
-    box-sizing: border-box;
-}
-
-.library-list-item:hover {
-    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
-}
-
-.library-list-item:active {
-    transform: scale(0.98);
-}
-
-.library-list-item .item-icon-container {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    opacity: 0.8;
-}
-
-.library-list-item .item-icon {
-    width: 16px;
-    height: 16px;
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-}
-
-.library-list-item .item-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.library-list-item .item-title {
-    font-size: 13px; /* Match Spaces UI */
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    opacity: 0.95;
-}
-
-.library-list-item .item-url {
-    font-size: 10px; /* Slightly smaller to fit 40px height */
-    opacity: 0.5;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-top: -1px; /* Tighter spacing */
-}
-
-.library-list-item .item-time {
-    font-size: 9px;
-    opacity: 0.35;
-    font-variant-numeric: tabular-nums;
-    margin-left: 0; /* Removed manual margin gap */
-    flex-shrink: 0;
-    display: block;
-}
-
-/* Hover Interaction: Timestamp <-> Folder Icon */
-.library-list-item:hover .item-time {
-    display: none; 
-}
-
-.library-list-item .item-folder-icon {
-    display: none;
-    width: 24px;
-    height: 24px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    cursor: pointer;
-    flex-shrink: 0;
-    opacity: 0.6;
-    margin-right: -4px; /* Align slightly right */
-}
-
-.library-list-item:hover .item-folder-icon {
-    display: flex;
-}
-
-.library-list-item .item-folder-icon:hover {
-    background: rgba(255, 255, 255, 0.1);
-    opacity: 1;
-}
-
-.library-list-item .item-folder-icon svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
-}
-
-:host(.closing) {
-    /* No special width needed, offset animation handles exit */
-}
-
-@keyframes blockSlideIn {
-    from { transform: translateX(-90px); }
-    to { transform: translateX(0); }
-}
-
-@keyframes blockSlideOut {
-    from { transform: translateX(0); }
-    to { transform: translateX(-90px); }
-}
-
-@keyframes contentFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes blockSlideInRight {
-    from { transform: translateX(90px); }
-    to { transform: translateX(0); }
-}
-
-@keyframes blockSlideOutRight {
-    from { transform: translateX(0); }
-    to { transform: translateX(90px); }
-}
-
-@keyframes contentFadeOut {
-    from { opacity: 1; }
-    to { opacity: 0; }
-}
-
-#zen-library-sidebar-new {
-    width: var(--zen-library-sidebar-width);
-    min-width: var(--zen-library-sidebar-width);
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 15px 0 6px 0;
-    box-sizing: border-box;
-    box-shadow: 0 0 16px rgba(0, 0, 0, 0.15);
-    border-right: 1px solid var(--zen-border-color, rgba(129, 129, 129, 0.1));
-    z-index: 2;
-    position: relative;
-    background: transparent !important;
-    animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
-}
-
-:host([right-side]) #zen-library-sidebar-new {
-    border-right: none;
-    border-left: 1px solid var(--zen-border-color, rgba(129, 129, 129, 0.1));
-    animation-name: blockSlideInRight;
-}
-
-:host([right-side]) {
-    flex-direction: row-reverse;
-}
-
-:host(.closing) #zen-library-sidebar-new {
-    animation: blockSlideOut 0.15s var(--zen-library-easing) both;
-}
-
-:host([right-side].closing) #zen-library-sidebar-new {
-    animation-name: blockSlideOutRight;
-}
-
-.zen-library-sidebar-items {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-}
-
-.sidebar-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px; /* Increased gap between icon and label */
-    cursor: pointer;
-    width: 76px;
-    padding: 10px 0;
-    border-radius: var(--border-radius-medium);
-    opacity: 0.6;
-}
-
-.sidebar-item:hover {
-    opacity: 0.75;
-    background: var(--tab-hover-background-color, rgba(255, 255, 255, 0.1));
-}
-
-.sidebar-item.active {
-    opacity: 0.8;
-    background: rgba(255, 255, 255, 0.15);
-    font-weight: 600;
-}
-
-.sidebar-item .icon {
-    width: 32px;
-    height: 32px;
-    transition: transform 0.3s var(--zen-library-easing);
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.sidebar-item .icon svg {
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-}
-
-.sidebar-item.active .icon {
-    /* Static selection: no scale or displacement */
-}
-
-.sidebar-item .icon path, 
-.sidebar-item .icon rect,
-.sidebar-item .icon circle {
-    transition: all 0.3s var(--zen-library-easing);
-    vector-effect: non-scaling-stroke;
-}
-
-.sidebar-item .label {
-    font-size: 11px; /* Increased from 10px */
-    text-align: center;
-    font-weight: 600 !important;
-    opacity: 0.9;
-    margin-top: 2px;
-}
-
-.sidebar-item.active .label {
-    font-weight: 800 !important;
-    opacity: 1;
-}
-
-/* Idle state: 0.7 opacity for all SVG elements */
-.sidebar-item .icon {
-    opacity: 0.7;
-    transition: opacity 0.3s var(--zen-library-easing);
-}
-
-.sidebar-item.active .icon {
-    opacity: 1;
-}
-
-.sidebar-item.active .icon circle,
-.sidebar-item.active .icon .front-rect,
-.sidebar-item.active .icon .back-rect {
-    fill-opacity: 1 !important;
-}
-
-/* Mountain always visible */
-.media-icon .mountain {
-    fill-opacity: 0.7;
-}
-.sidebar-item.active .media-icon .mountain {
-    fill-opacity: 1 !important;
-}
-
-
-.back-icon {
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='19' y1='12' x2='5' y2='12'%3E%3C/line%3E%3Cpolyline points='12 19 5 12 12 5'%3E%3C/polyline%3E%3C/svg%3E");
-    background-color: currentColor !important;
-    width: 24px !important;
-    height: 24px !important;
-}
-
-#zen-library-main-panel {
-    /* Explicitly sizing because host is visually collapsed (0px/small) */
-    width: calc(var(--zen-library-width) - var(--zen-library-sidebar-width));
-    min-width: 250px;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    padding: 16px 0 0 0; /* 16px top, 0px horizontal/bottom */
-    box-sizing: border-box;
-    z-index: 1;
-    animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
-    /* CRITICAL: Do not shrink, allow overflow out of host */
-    flex-shrink: 0;
-    flex-grow: 0;
-    min-height: 0; /* Prevention of flex expansion */
-}
-
-:host([right-side]) #zen-library-main-panel {
-    animation-name: blockSlideInRight;
-}
-
-:host([active-tab="spaces"]) #zen-library-main-panel { padding: 0; }
-
-:host(.closing) #zen-library-main-panel {
-    animation: blockSlideOut 0.15s var(--zen-library-easing) both;
-}
-
-:host([right-side].closing) #zen-library-main-panel {
-    animation-name: blockSlideOutRight;
-}
-
-.library-header, .library-content {
-    opacity: 0;
-    animation: contentFadeIn 0.2s ease-in both;
-}
-
-:host(.closing) .library-header, :host(.closing) .library-content {
-    animation: contentFadeOut 0.15s ease-in both;
-}
-
-.library-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    position: relative;
-    overflow: hidden;
-    min-height: 0; /* Prevention of flex expansion */
-}
-
-.library-content-fade-in {
-    animation: contentFadeIn 0.3s var(--zen-library-easing);
-}
-
-@keyframes contentFadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes emptyStateFadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 0.7; transform: translateY(0); }
-}
-
-.library-list-wrapper {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.library-list-panes {
-    display: flex;
-    flex: 1;
-    width: 200%;
-    transition: transform 0.25s var(--zen-library-easing);
-    will-change: transform;
-}
-
-.history-pane {
-    width: 50%;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    position: relative;
-}
-
-.library-list-container, .library-closed-windows-container {
-    flex: 1;
-    overflow-y: hidden; /* Hide by default to prevent 1px lines */
-    overflow-x: hidden;
-    padding: 0;
-}
-
-.scrollbar-visible {
-    scrollbar-width: auto !important; /* Restore native width */
-    overflow-y: auto !important; /* Only scroll when visible */
-}
-
-.view-switcher-container {
-    display: flex;
-    align-items: center;
-    padding: 4px 16px;
-    margin-bottom: 4px;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    opacity: 0.6;
-    transition: opacity 0.2s;
-    user-select: none;
-}
-
-.view-switcher-container:hover {
-    opacity: 1;
-}
-
-.view-switcher-arrow {
-    width: 14px;
-    height: 14px;
-    background-color: currentColor;
-    mask-image: url("chrome://global/skin/icons/arrow-down.svg");
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    transition: transform 0.3s var(--zen-library-easing);
-}
-
-.panes-shifted .view-switcher-arrow {
-    transform: rotate(-90deg);
-}
-
-.panes-shifted .library-list-panes {
-    transform: translateX(-50%);
-}
-
-.history-nav-item {
-    display: flex;
-    align-items: center;
-    gap: 8px; /* Match library-list-item */
-    padding: 0 8px; /* Match library-list-item */
-    height: 40px; /* Match library-list-item */
-    cursor: pointer;
-    transition: all 0.2s var(--zen-library-easing);
-    border-radius: var(--border-radius-medium);
-    margin: 0 8px; /* Match library-list-item */
-    color: var(--ws-text-color);
-    flex-shrink: 0;
-    opacity: 0.9;
-}
-
-.history-nav-item:hover {
-    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.08));
-}
-
-.history-nav-item .nav-icon {
-    width: 16px; /* Match history favicon size */
-    height: 16px; /* Match history favicon size */
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-    opacity: 0.8;
-}
-
-.history-nav-item .nav-label {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.history-nav-item .nav-arrow {
-    width: 16px;
-    height: 16px;
-    background-color: currentColor;
-    mask-image: url("chrome://global/skin/icons/arrow-right.svg");
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    opacity: 0.5;
-}
-
-.history-back-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    opacity: 0.6;
-    transition: opacity 0.2s;
-    margin-bottom: 0px; /* Reduced from 8px */
-}
-
-.history-back-button:hover {
-    opacity: 1;
-}
-
-.history-back-button .back-arrow {
-    width: 14px;
-    height: 14px;
-    background-color: currentColor;
-    mask-image: url("chrome://global/skin/icons/arrow-left.svg");
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-}
-
-.history-separator {
-    height: 1px;
-    background: currentColor;
-    opacity: 0.1;
-    margin: 4px 16px; /* Tighter margins */
-}
-
-.search-container {
-    background: var(--zen-toolbar-element-bg) !important;
-    border-radius: var(--border-radius-medium);
-    display: flex;
-    align-items: center;
-    padding: 0; 
-    margin: 0 16px 8px 16px; /* Aligned with media-grid 16px padding */
-    gap: 0;
-    width: auto;
-    outline: none !important;
-    overflow: hidden;
-    position: relative;
-    height: 40px; 
-}
-
-.search-container input {
-    background: none;
-    border: none;
-    flex: 1;
-    font-size: 13.5px;
-    outline: none;
-    padding-left: 8px;
-    padding-right: 4px;
-    height: 100%;
-    color: inherit;
-}
-
-.search-icon-wrapper {
-    width: 40px; /* Match height */
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    opacity: 0.5;
-}
-
-
-.search-icon {
-    width: 18px;
-    height: 18px;
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E");
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    background-color: currentColor;
-    opacity: 0.5;
-}
-
-.search-container input {
-    background: none;
-    border: none;
-    flex: 1;
-    font-size: 15px;
-    outline: none;
-}
-
-.empty-state {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 24px;
-    height: 100%;
-    width: 100%;
-}
-
-
-
-.empty-state h3 { font-size: 22px; font-weight: 600; opacity: 0.5; margin: 0; }
-.empty-state p { font-size: 14px; opacity: 0.5; line-height: 1.6; margin: 0; }
-
-.learn-more {
-    border: none;
-    padding: 10px 24px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    background: var(--zen-primary-color, #3b82f6);
-    color: white;
-}
-
-/* SPACES GRID & CARD */
-.library-workspace-grid {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    gap: 16px;
-    padding: 0 20px;
-    align-items: center;
-    height: 100%;
-    overflow-x: hidden;
-    overflow-y: hidden;
-    /* Inheritance of library scrollbar styles */
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
-}
-
-.library-workspace-grid::-webkit-scrollbar {
-    width: 4px;
-    height: 4px; /* Ensure horizontal scrollbar is styled */
-}
-
-.library-workspace-grid::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, currentColor, transparent 50%);
-    border-radius: 10px;
-}
-
-.library-workspace-grid::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.library-workspace-grid.scrollbar-visible {
-    overflow-x: auto;
-}
-
-
-
-/* Create Workspace Button */
-.library-create-workspace-button {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
-    border-radius: 50%;
-    background: light-dark(
-        color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
-        color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%)
-    );
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: opacity 0.2s ease, transform 0.15s cubic-bezier(0.07, 0.95, 0, 1);
-    opacity: 0.7;
-    color: var(--toolbarbutton-icon-fill, rgba(255, 255, 255, 0.85));
-    margin-left: 2px; /* Shifted back left to feel even with last card spacing */
-}
-
-.library-create-workspace-button:hover {
-    opacity: 1;
-    transform: scale(1.05);
-}
-
-.library-create-workspace-button:active {
-    transform: scale(0.95);
-    transition: transform 0.1s ease-out;
-    opacity: 0.9;
-}
-
-.library-create-workspace-button span {
-    font-size: 22px;
-    font-weight: 300;
-    line-height: 0; /* Align using line-height 0 and small margin */
-    color: inherit;
-    user-select: none;
-    transition: transform 0.2s ease;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: -1.5px; /* Fine-tuned for pixel-perfect centering */
-}
-
-.library-create-workspace-button:active span {
-    transform: scale(0.95);
-}
-
-.library-workspace-card {
-    width: 240px;
-    min-width: 240px;
-    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
-    max-height: calc(100% - (var(--zen-element-separation, 4px) * 10));
-    flex-shrink: 0;
-    flex-grow: 0;
-    margin: 0; 
-    border-radius: var(--border-radius-medium);
-    padding: 8px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: var(--ws-gradient, var(--zen-primary-color));
-    color: var(--ws-text-color, inherit);
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-    contain: strict; /* Isolation from layout changes */
-    transition: opacity 0.3s var(--zen-library-easing);
-}
-
-.library-workspace-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: url("chrome://browser/content/zen-images/grain-bg.png");
-    opacity: var(--ws-grain, 0);
-    pointer-events: none;
-    mix-blend-mode: overlay;
-}
-
-.library-workspace-card-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    position: relative;
-    z-index: 2; /* Staying above grain/overlay */
-    padding: 6px 10px; /* Reduced top/bottom padding by 4px */
-    opacity: 0.9;
-    flex-shrink: 0;
-}
-
-.library-workspace-separator-container {
-    margin: 8px 10px; 
-    display: flex;
-    align-items: center;
-}
-
-.library-workspace-icon-container { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; opacity: 0.8; color: var(--ws-text-color); }
-.library-workspace-icon { 
-    width: 100%; 
-    height: 100%; 
-    object-fit: contain; 
-    /* If it's an image SVG, use mask to apply theme color */
-    background-color: currentColor;
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-}
-.library-workspace-icon-text { font-size: 16px; color: var(--ws-text-color); }
-.library-workspace-icon-empty { width: 100%; height: 100%; border: 1px dashed var(--ws-text-color); border-radius: 4px; opacity: 0.5; }
-.library-workspace-name { font-size: 14px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-text-color); }
-
-/* SPACES UI ITEMS - Adopted from Nebula */
-.library-workspace-card-list {
-    flex: 1;
-    overflow-y: auto;
-    scrollbar-width: none;
-    min-height: 0;
-}
-
-.library-workspace-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-left: var(--tab-inline-padding);
-    min-height: var(--tab-min-height);
-    margin-block: 4px;
-    margin-bottom: 2px;
-    border-radius: var(--border-radius-medium) !important;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-size: 13px;
-    opacity: 0.9;
-    box-sizing: border-box;
-    flex-shrink: 0;
-    position: relative;
-    overflow: hidden;
-}
-
-.library-workspace-item:hover {
-    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
-}
-
-.library-workspace-item.selected {
-    background: var(--ws-tab-selected-color, rgba(255, 255, 255, 0.12));
-    box-shadow: var(--ws-tab-selected-shadow, none);
-}
-
-.library-workspace-item .item-icon {
-    width: 16px;
-    height: 16px;
-    border-radius: 3px;
-    flex-shrink: 0;
-}
-
-.library-workspace-item .item-label {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-    direction: ltr;
-    mask-image: linear-gradient(to left, transparent, black var(--tab-label-mask-size));
-    transition: mask-image 0.15s ease;
-}
-
-.library-workspace-item:hover .item-label {
-    /* Occlude text behind the close button */
-    mask-image: linear-gradient(to left, transparent 32px, black 44px);
-}
-
-.library-workspace-item.folder .item-label {
-    font-weight: 600 !important;
-}
-
-.library-tab-close-button {
-    position: absolute;
-    right: 6px; /* Moved 2px more to the right */
-    top: 50%;
-    transform: translateY(-50%);
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--border-radius-small, 4px);
-    opacity: 0;
-    pointer-events: none;
-    cursor: pointer;
-    background: transparent;
-    color: var(--ws-text-color, inherit);
-    transition: all 0.15s ease;
-}
-
-.library-tab-close-button .icon-mask {
-    width: 14px;
-    height: 14px;
-    background-color: currentColor;
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    -moz-context-properties: fill, stroke;
-}
-
-.library-tab-close-button.unpin .icon-mask {
-    mask-image: url("chrome://browser/skin/zen-icons/unpin.svg");
-}
-
-.library-tab-close-button.close .icon-mask {
-    mask-image: url("chrome://browser/skin/zen-icons/close.svg") !important;
-}
-
-.library-workspace-item:hover .library-tab-close-button {
-    opacity: 0.7;
-    pointer-events: auto;
-}
-
-.library-tab-close-button:hover {
-    opacity: 1 !important;
-    background: var(--ws-tab-hover-color, rgba(128, 128, 128, 0.3));
-}
-
-
-/* FOLDER STYLES - Exact copy from Nebula */
-.library-workspace-folder {
-    flex-shrink: 0; /* Prevention of layout shift */
-    width: 100%;
-}
-
-.library-workspace-folder.collapsed > .library-workspace-folder-content {
-    max-height: 0;
-    opacity: 0;
-    transform: translateY(-10px);
-    pointer-events: none;
-}
-
-.library-workspace-folder-content {
-    margin-inline-start: 16px;
-    transition: max-height 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
-                opacity 0.1s ease, 
-                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    max-height: 1000px; /* Safe large value for expansion */
-    overflow: hidden;
-}
-
-.library-workspace-separator-container {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    margin: 8px 0 0px 2px; /* No right margin to allow separator to reach the edge */
-    position: relative;
-    z-index: 10;
-}
-
-.library-workspace-separator {
-    flex: 1;
-    height: 1px;
-    background: var(--ws-text-color, rgba(255, 255, 255, 0.08));
-    opacity: 0.15;
-    transition: all 0.2s ease;
-}
-
-.library-workspace-cleanup-button {
-    height: 18px;
-    padding: 0;
-    width: 0;
-    opacity: 0;
-    border-radius: 4px;
-    cursor: pointer;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    color: var(--ws-text-color);
-    flex-shrink: 0;
-    font-size: 11px;
-    font-weight: 500;
-    pointer-events: none;
-    margin-left: 0; 
-    transition: opacity 0.2s ease;
-}
-
-.library-workspace-card:hover .library-workspace-cleanup-button {
-    width: 48px;
-    padding: 0 4px;
-    margin-left: 4px;
-    opacity: 0.6;
-    pointer-events: auto;
-}
-
-.library-workspace-cleanup-button:hover {
-    opacity: 1 !important;
-    background-color: transparent !important;
-    box-shadow: none !important;
-}
-
-.library-workspace-edit-button {
-    margin-left: auto;
-    cursor: pointer;
-    opacity: 0.7; /* Match drag handle opacity */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    padding: 6px;
-    margin-right: -2px; /* Align with right edge like drag handle */
-    transition: opacity 0.2s ease;
-    border-radius: 4px;
-    color: var(--ws-text-color);
-}
-
-.library-workspace-edit-button:hover {
-    opacity: 1;
-    background: transparent; /* Match drag handle hover */
-}
-
-.library-workspace-edit-button div {
-    width: 14px;
-    height: 14px;
-    background-color: currentColor;
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 122.88 103.78' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0,103.78c11.7-8.38,30.46.62,37.83-14a16.66,16.66,0,0,0,.62-13.37,10.9,10.9,0,0,0-3.17-4.35,11.88,11.88,0,0,0-2.11-1.35c-9.63-4.78-19.67,1.91-25,10-4.9,7.43-7,16.71-8.18,23.07ZM54.09,43.42a54.31,54.31,0,0,1,15,18.06l50.19-49.16c3.17-3,5-5.53,2.3-10.13A6.5,6.5,0,0,0,117.41,0,7.09,7.09,0,0,0,112.8,1.6L54.09,43.42Zm-16.85,22c2.82,1.52,6.69,5.25,7.61,9.32L65.83,64c-3.78-7.54-8.61-14-15.23-18.58-6.9,9.27-5.5,11.17-13.36,20Z' fill='black' fill-rule='evenodd'/%3E%3C/svg%3E");
-    pointer-events: none;
-}
-
-.library-workspace-cleanup-button::before {
-    content: "";
-    width: 12px;
-    height: 12px;
-    background-color: currentColor;
-    mask-image: url("data:image/svg+xml,%3Csvg fill='none' stroke='currentColor' stroke-width='1.5' height='12' width='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 2.75,7.75 6,11 9.25,7.75 M 6,1 v 9.75'/%3E%3C/svg%3E");
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-}
-
-.library-card-footer {
-    padding: 6px 10px; /* Reduced top/bottom padding by 4px */
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    opacity: 0.7;
-    border-top: none;
-    margin-top: auto;
-    font-size: 14px;
-    flex-shrink: 0;
-    color: var(--ws-text-color);
-}
-
-.library-workspace-drag-handle {
-    cursor: grab;
-    padding: 6px 8px 8px 8px; /* Balanced padding */
-    margin: -2px -4px -4px -4px; /* Equal visual spacing from edges */
-    border-radius: 4px;
-    transition: opacity 0.2s;
-    user-select: none;
-    font-size: 18px;
-    line-height: 1;
-    opacity: 0.7; /* Match edit button */
-}
-
-.library-workspace-drag-handle:hover {
-    background: transparent; /* Remove background on hover */
-    opacity: 1;
-}
-
-.library-workspace-drag-handle:active {
-    cursor: grabbing;
-}
-
-.library-workspace-grid[dragging-workspace="true"] .library-workspace-card:not([dragged="true"]) {
-    opacity: 0.7;
-    filter: none;
-    pointer-events: none;
-}
-
-/* Ensure placeholder also has sizing and flex properities */
-.library-workspace-card-placeholder {
-    width: 240px;
-    min-width: 240px;
-    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
-    background: rgba(255, 255, 255, 0.05);
-    border: 2px dashed var(--zen-folder-stroke, rgba(255, 255, 255, 0.3));
-    border-radius: var(--border-radius-medium);
-    flex-shrink: 0;
-    opacity: 0.7;
-    animation: placeholderPopIn 0.3s var(--zen-library-easing) forwards;
-}
-
-@keyframes placeholderPopIn {
-    from {
-        opacity: 0;
-        transform: scale(0.9);
-    }
-    to {
-        opacity: 0.7;
-        transform: scale(1);
-    }
-}
-
-.library-workspace-card[dragged="true"] {
-    position: fixed !important;
-    z-index: 2 !important;
-    pointer-events: none;
-    transform-origin: center center;
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-    opacity: 1 !important;
-    margin: 0 !important;
-    /* Disable transitions while dragged to ensure instant scaling for offset calculation and smooth lerp */
-    transition: none !important; 
-    /* User requested: var(--zen-primary-color) as solid base behind gradient */
-    background-color: var(--dragged-bg-color, var(--zen-colors-tertiary, #222)) !important;
-    background-image: none !important; /* Ensure solid base is visible */
-}
-
-/* Layer the gradient on top of the solid primary color */
-.library-workspace-card[dragged="true"]::before {
-    content: "" !important;
-    position: absolute !important;
-    inset: 0 !important;
-    background: var(--ws-gradient) !important;
-    opacity: 1 !important;
-    z-index: 1 !important;
-    border-radius: inherit;
-}
-
-/* Restore grain/noise visibility on dragged card */
-.library-workspace-card[dragged="true"]::after {
-    content: "" !important;
-    position: absolute !important;
-    inset: 0 !important;
-    background-image: url("chrome://browser/content/zen-images/grain-bg.png") !important;
-    opacity: var(--ws-grain, 0.45) !important;
-    pointer-events: none !important;
-    mix-blend-mode: overlay !important;
-    z-index: 2 !important;
-    border-radius: inherit;
-}
-
-.folder-icon {
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-}
-
-/* FOLDER SVG FIXES - NEBULA EXACT COPY */
-.folder-icon svg {
-    overflow: visible !important;
-    margin-left: -18px; 
-
-}
-
-.folder-icon svg image {
-    fill: var(--ws-folder-stroke);
-    -moz-context-properties: fill, fill-opacity;
-}
-
-.folder-icon svg g, 
-.folder-icon svg rect, 
-.folder-icon svg path {
-    transition: transform 0.3s cubic-bezier(0.42, 0, 0, 1), opacity 0.3s cubic-bezier(0.42, 0, 0, 1);
-}
-
-.folder-icon svg[state='open'] .back {
-    transform: skewX(16deg) translate(-2px, 3.4px) scale(0.85);
-}
-
-.folder-icon svg[state='open'] :is(.front, .dots, .icon) {
-    transform: skewX(-16deg) translate(11.1px, 3.4px) scale(0.85);
-}
-
-/* SPLIT VIEW STYLES - 1:1 with Zen Native */
-.library-split-view-group {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    margin-block: 4px;
-    margin-inline: 0;
-    border-radius: var(--border-radius-medium);
-    transition: background-color 0.2s, box-shadow 0.2s;
-    position: relative;
-    padding: 0 2px;
-    min-height: var(--tab-min-height);
-}
-
-.library-split-view-group:hover {
-    background: var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08));
-}
-
-.library-split-view-group:has(.selected) {
-    background: var(--ws-tab-selected-color, rgba(255, 255, 255, 0.12));
-    box-shadow: var(--ws-tab-selected-shadow, none);
-}
-
-.library-split-view-group .library-workspace-item {
-    flex: 1;
-    min-width: 0; /* Ensures equal distribution regardless of text length */
-    margin: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding-inline: 8px;
-    justify-content: center;
-}
-
-.library-split-view-group .library-workspace-item .item-label {
-    /* Optional: Hide labels in split view if they are too cramped, 
-       but Zen usually shows them if there's space. 
-       For now, let's keep them and let the mask handles it. */
-}
-
-.library-split-view-group .library-workspace-item:not(:last-child)::after {
-    content: '';
-    width: 1px;
-    height: 16px;
-    background-color: var(--ws-text-color);
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    opacity: 0.3; /* Subtle separator */
-}
-
-.library-tab-identity-line {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background-color: var(--identity-tab-color, transparent);
-    z-index: 5;
-    pointer-events: none;
-    opacity: 0.8;
-}
-
-.library-split-view-group .library-workspace-item:hover .item-label {
-     mask-image: linear-gradient(to left, transparent 28px, black 40px);
-}
-
-.library-list-container {
-    position: absolute;
-    inset: 0;
-    flex-direction: column;
-    padding: 0;
-    overflow-y: hidden; /* defer to .scrollbar-visible */
-    gap: 4px; /* Slightly tighter gap */
-    min-height: 0;
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
-}
-
-.library-list-container::-webkit-scrollbar {
-    width: 4px;
-}
-
-.library-list-container::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, currentColor, transparent 50%);
-    border-radius: 10px;
-}
-
-.library-list-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.history-bottom-spacer {
-    height: 16px;
-    flex-shrink: 0;
-}
-
-.history-section-header {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.5;
-    margin: 8px 8px 8px 8px; /* 8px horizontal padding */
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.history-section-header::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: currentColor;
-    opacity: 0.2;
-}
-
-.library-list-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 8px;
-    height: 40px;
-    margin: 0 8px;
-    border-radius: var(--border-radius-medium);
-    cursor: pointer;
-    transition: all 0.2s; /* Sync with workspace item */
-    position: relative;
-    user-select: none;
-    flex-shrink: 0;
-    opacity: 0.9; /* Sync with workspace item */
-    box-sizing: border-box;
-}
-
-
-.library-list-item:hover {
-    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
-}
-
-.library-list-item:active {
-    transform: scale(0.98);
-}
-
-.library-list-item .item-icon-container {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    opacity: 0.8;
-}
-
-.library-list-item .item-icon {
-    width: 16px;
-    height: 16px;
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-}
-
-.library-list-item .item-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.library-list-item .item-title {
-    font-size: 13px; /* Match Spaces UI */
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    opacity: 0.95;
-}
-
-.library-list-item .item-url {
-    font-size: 10px; /* Slightly smaller to fit 40px height */
-    opacity: 0.5;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-top: -1px; /* Tighter spacing */
-}
-
-.library-list-item .item-time {
-    font-size: 9px;
-    opacity: 0.35;
-    font-variant-numeric: tabular-nums;
-    margin-left: 0; /* Removed manual margin gap */
-    flex-shrink: 0;
-}
-
-
-/* Hover Interaction: Timestamp <-> Folder Icon */
-.library-list-item:hover .item-time {
-    display: none; 
-}
-
-.library-list-item .item-folder-icon {
-    display: none;
-    width: 24px;
-    height: 24px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    cursor: pointer;
-    flex-shrink: 0;
-    opacity: 0.6; /* Reduced opacity */
-    margin-right: 0; /* Reset manual margin to rely on container padding (8px) */
-    color: var(--ws-text-color, inherit); /* Ensure currentColor is valid */
-}
-
-.library-list-item:hover .item-folder-icon {
-    display: flex;
-}
-
-.library-list-item .item-folder-icon:hover {
-    background: rgba(255, 255, 255, 0.1);
-    opacity: 1;
-}
-
-/* Replicate .library-tab-close-button .icon-mask pattern */
-.library-list-item .item-folder-mask {
-    width: 16px; /* Smaller size */
-    height: 16px;
-    background-color: currentColor;
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    /* Zen Native "Folder" path (Modified to black for masking) */
-    mask-image: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 6H12L10 4H4C2.89543 4 2 4.89543 2 6V18C2 19.1046 2.89543 20 4 20H20C21.1046 20 22 19.1046 22 18V8C22 6.89543 21.1046 6 20 6Z' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
-
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    text-align: center;
-    padding: 20px;
-    gap: 10px;
-    box-sizing: border-box;
-    animation: emptyStateFadeIn 0.3s var(--zen-library-easing) both;
-}
-
-.empty-state h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    opacity: 0.9;
-}
-
-.empty-state p {
-    margin: 0;
-    font-size: 13px;
-    opacity: 0.6;
-    max-width: 250px;
-}
-
-.empty-icon {
-    width: 64px;
-    height: 64px;
-    background-color: currentColor;
-    opacity: 0.2;
-    margin-bottom: 8px;
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    -moz-context-properties: fill, stroke;
-}
-
-.empty-icon.downloads-icon {
-    mask-image: url("chrome://browser/skin/downloads/downloads.svg");
-}
-
-.empty-icon.history-icon {
-    mask-image: url("chrome://browser/skin/history.svg");
-}
-
-.empty-icon.spaces-icon {
-    mask-image: url("chrome://browser/skin/window.svg");
-}
-
-.empty-icon.media-icon {
-    mask-image: url("chrome://global/skin/media/audio.svg"); /* Fallback guess */
-}
-
-/* Media Grid - Pinterest Style */
-.media-grid {
-    position: absolute;
-    inset: 0;
-    display: block; 
-    padding: 16px 18px;
-    box-sizing: border-box;
-    overflow-y: auto; 
-    overflow-x: hidden;
-    scrollbar-width: auto;
-    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
-}
-
-.media-grid::-webkit-scrollbar { 
-    width: 4px; 
-}
-
-.media-grid::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, currentColor, transparent 50%);
-    border-radius: 10px;
-}
-
-.media-grid::-webkit-scrollbar-track {
-    background: transparent !important;
-}
-
-.media-masonry-wrapper {
-    column-width: 210px; 
-    column-gap: 16px;
-    width: 100%;
-}
-
-
-.media-card {
-    /* Full-bleed Minimalist Vibe */
-    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color, rgba(255, 255, 255, 0.08)));
-    border: none;
-    border-radius: var(--border-radius-medium);
-    /* Use clip-path instead of overflow:hidden to fix Gecko's backdrop-filter bug */
-    overflow: hidden;
-    break-inside: avoid;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    cursor: pointer;
-    transition: background-color 0.2s ease, box-shadow 0.2s ease;
-    margin-bottom: 16px; 
-    padding: 0; 
-    transform: translateZ(0);
-}
-
-/* Hover Backdrop Overlay - Darkens the whole card */
-.media-card::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: transparent;
-    transition: background 0.2s ease;
-    z-index: 1;
-    pointer-events: none;
-    border-radius: inherit;
-}
-
-.media-card:hover::after {
-    background: rgba(0, 0, 0, 0.3);
-}
-
-.media-card:active {
-    opacity: 0.9;
-}
-
-/* Use a wrapper for the image to handle aspect ratio/sizing cleanly */
-.media-preview-container {
-    width: 100%;
-    margin: 0;
-    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.05));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    position: relative;
-    color: #fff;
-    font-size: 10px;
-    min-height: 120px;
-    border-radius: var(--border-radius-medium); /* Manual rounding since parent has no overflow:hidden */
-}
-
-.media-card img, .media-card video {
-    width: 100%;
-    height: auto;
-    min-height: 100%;
-    object-fit: cover; 
-    display: block;
-    transition: opacity 0.3s;
-    z-index: 0;
-}
-
-.media-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 10px 12px; 
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    background: light-dark(
-        color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
-        color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%)
-    );
-    color: inherit !important; /* Match library UI text color */
-    opacity: 0;
-    transform: translateY(10px); 
-    transition: transform 0.2s var(--zen-library-easing), opacity 0.2s var(--zen-library-easing);
-    pointer-events: none;
-    z-index: 2;
-}
-
-.media-card:hover .media-info {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.media-meta-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-}
-
-.media-title {
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.media-meta, .media-time {
-    font-size: 10px;
-    opacity: 0.7;
-}
-
-.video-duration-badge {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    padding: 2px 6px;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
-    font-size: 10px;
-    font-weight: 600;
-    border-radius: 4px;
-    z-index: 2;
-    transition: opacity 0.2s;
-}
-
-
-.media-glance-info {
-    padding: 16px 20px;
-    background: rgba(20, 20, 20, 0.8);
-    color: #fff;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.media-glance-title {
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-right: 20px;
-}
-
-/* FORCE override for loading icon to show SVG */
-.empty-icon.media-icon {
-    background: transparent !important; /* Fix "It has background" issue */
-    background-image: none !important;
-    mask-image: none !important;
-    width: 64px !important;
-    height: 64px !important;
-    opacity: 0.2;
-}
-
-/* Ensure the SVG inside gets correct sizing if needed */
-.empty-icon.media-icon svg {
-    display: block;
-    margin: 0 auto;
-    width: 64px !important;
-    height: 64px !important;
-}
-`;
-
+    const _ucScriptPath = Components.stack.filename;
     const GLOBAL_CSS = `
 :root[zen-library-open="true"] #navigator-toolbox,
 :root[zen-library-open-compact="true"] #navigator-toolbox,
@@ -1692,111 +24,206 @@
 :root[zen-library-open-compact="true"] #urlbar:not([open]) {
     transform: translateX(var(--zen-library-offset, 0px)) !important;
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    /* Ensure it doesn't try to be clever with width */
     width: 100% !important; 
 }
 :root[zen-right-side="true"][zen-library-open="true"] #zen-appcontent-wrapper,
 :root[zen-right-side="true"][zen-library-open-compact="true"] #zen-appcontent-wrapper,
 :root[zen-right-side="true"][zen-library-open="true"] #urlbar:not([open]),
 :root[zen-right-side="true"][zen-library-open-compact="true"] #urlbar:not([open]) {
-    /* Negative translate for right side */
     transform: translateX(calc(-1 * var(--zen-library-offset, 0px))) !important;
 }
-
-
-/* Fix Native Glance Layering & Position */
 .browserSidebarContainer.zen-glance-overlay {
-    /* Native glance lives inside the translated wrapper. 
-       We must pull the ENTIRE overlay back so it's not clipped by the wrapper's translation. */
     translate: calc(-1 * var(--zen-library-offset, 0px)) 0;
     transition: translate 0.5s var(--zen-library-easing);
-
 }
-
 :root[zen-right-side="true"] .browserSidebarContainer.zen-glance-overlay {
     translate: var(--zen-library-offset, 0px) 0;
 }
-
-/* CRITICAL: Prevent clipping when translated back */
 :root:has(.zen-glance-overlay) #zen-appcontent-wrapper,
 :root:has(.zen-glance-overlay) #browser {
     overflow: visible !important;
 }
-
 zen-library, #zen-library-container {
     opacity: 1;
     transition: opacity 0.2s ease !important;
 }
-
-/* Ensure Library stays below the Glance overlay and matches native dimming */
 :root:has(.zen-glance-overlay:not([fade-out="true"])) #zen-library-container {
     opacity: 0.4 !important;
 }
-
 :root.zen-toolbox-fading-in #navigator-toolbox {
     animation: zen-fade-in 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
 }
 @keyframes zen-fade-in { from { opacity: 0; } to { opacity: 1; } }
 `;
 
-    function escapeHTML(str) {
-        if (!str) return "";
-        return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    }
+    // Initialize features if they are not yet loaded (Assumption: they are loaded via UC loader or manual scripts)
+    // If we needed to force load them, we would use Services.scriptloader.loadSubScript here.
 
-    class ZenLibrarySpaces {
-        static getWorkspaces() { return window.gZenWorkspaces ? window.gZenWorkspaces.getWorkspaces() : []; }
-        static calculatePanelWidth(count) {
-            const total = 90 + 40 + (count * 240) + ((count - 1) * 16);
-            return Math.min(total, window.innerWidth * 0.8);
+    /**
+     * Reusable Component for Library Items
+     * Moved here to ensure it is defined before use by feature modules
+     */
+    class ZenLibraryItem extends HTMLElement {
+        constructor() {
+            super();
+            // Use Light DOM to inherit global ZenLibrary.css styles
         }
-        static calculateMediaWidth(count) {
-            // Default width for loading/empty states
-            if (count === undefined || count === null || count === 0) return 340;
 
-            const maxAllowedWidth = window.innerWidth * 0.6;
-            const sidebar = 90;
-            const padding = 36; // 18px each side to match 340px total
-            const colWidth = 210;
-            const gap = 16;
-            const scrollbarBuffer = 4; // Width of our custom scrollbar
+        connectedCallback() {
+            if (this.hasAttribute('rendered')) return;
+            this.render();
+            this.setAttribute('rendered', 'true');
+        }
 
-            // 1. Determine desired columns based on count (User thresholds)
-            let desiredCols = 1;
-            if (count > 4) desiredCols = 2;
-            if (count > 10) desiredCols = 3;
+        static get observedAttributes() {
+            return ['title', 'subtitle', 'time', 'icon', 'status'];
+        }
 
-            // 2. Helper to calculate width for N columns
-            const getWidthForCols = (n) => sidebar + padding + (n * colWidth) + ((n - 1) * gap) + scrollbarBuffer;
+        attributeChangedCallback(name, oldValue, newValue) {
+            if (this._structureCreated) {
+                this.updateValues();
+            }
+        }
 
-            // 3. Scale down desiredCols if it exceeds 60% viewport
-            let finalCols = desiredCols;
-            while (finalCols > 1 && getWidthForCols(finalCols) > maxAllowedWidth) {
-                finalCols--;
+        set data(item) {
+            this._item = item;
+            if (this._structureCreated) {
+                this.updateValues();
+            } else {
+                this.render(); // Render structure if not already
+            }
+        }
+
+        get data() { return this._item; }
+
+        render() {
+            // If already rendered structure, just update values
+            if (this._structureCreated) {
+                this.updateValues();
+                return;
             }
 
-            // 4. Return exact width for those columns
-            return getWidthForCols(finalCols);
-        }
-        static calculateMediaColumns(width) {
-            const sidebar = 90;
-            const padding = 36;
-            const colWidth = 210;
-            const gap = 16;
-            const scrollbarBuffer = 4;
+            this.innerHTML = "";
+            this.className = "library-list-item";
 
-            const avail = width - sidebar - padding - scrollbarBuffer;
-            // Precise column calculation matching width logic
-            return Math.max(1, Math.floor((avail + gap + 2) / (colWidth + gap)));
+            // Check status for deleted/disabled state
+            if (this._item && this._item.status === 'deleted') {
+                this.classList.add('deleted');
+            }
+            if (this.hasAttribute('pop-in')) {
+                this.classList.add('pop-in');
+            }
+
+            // Main container for left side (Icon + Info)
+            const mainGroup = document.createElement('div');
+            mainGroup.style.display = "flex";
+            mainGroup.style.alignItems = "center";
+            mainGroup.style.flex = "1";
+            mainGroup.style.minWidth = "0"; // Text overflow fix
+            mainGroup.style.gap = "8px"; // Match .library-list-item gap
+
+            // Icon Container
+            const iconContainer = document.createElement('div');
+            iconContainer.className = "item-icon-container";
+            const icon = document.createElement('div');
+            icon.className = "item-icon";
+            iconContainer.appendChild(icon);
+
+            // Info Container
+            const info = document.createElement('div');
+            info.className = "item-info";
+            const title = document.createElement('div');
+            title.className = "item-title";
+            const subtitle = document.createElement('div');
+            subtitle.className = "item-url";
+            info.appendChild(title);
+            info.appendChild(subtitle);
+
+            mainGroup.appendChild(iconContainer);
+            mainGroup.appendChild(info);
+            this.appendChild(mainGroup);
+
+            // Time
+            const time = document.createElement('div');
+            time.className = "item-time";
+            this.appendChild(time);
+
+            this._elements = { icon, title, subtitle, time };
+            this._structureCreated = true;
+            this.updateValues();
         }
-        static getData() {
-            const ws = this.getWorkspaces();
-            return { workspaces: ws, width: ws.length ? this.calculatePanelWidth(ws.length) : 340 };
+
+        updateValues() {
+            if (!this._elements || !this._structureCreated) return;
+
+            const iconUrl = this.getAttribute('icon') || (this._item ? this._item.icon : '');
+            const titleVal = this.getAttribute('title') || (this._item ? this._item.title : '');
+            const subtitleVal = this.getAttribute('subtitle') || (this._item ? this._item.subtitle : '');
+            const timeVal = this.getAttribute('time') || (this._item ? this._item.time : '');
+
+            if (iconUrl) this._elements.icon.style.backgroundImage = `url('${iconUrl}')`;
+            this._elements.title.textContent = titleVal;
+            this._elements.subtitle.textContent = subtitleVal;
+            this._elements.time.textContent = timeVal;
+
+            // Update status class based on _item data
+            if (this._item && this._item.status === 'deleted') {
+                this.classList.add('deleted');
+            } else {
+                this.classList.remove('deleted');
+            }
+        }
+
+        appendSecondaryAction(element) {
+            this.appendChild(element);
         }
     }
 
-    // Cache for media count to prevent width jump
-    window.gZenLibraryMediaCount = window.gZenLibraryMediaCount || 0;
+    if (!customElements.get('zen-library-item')) {
+        customElements.define('zen-library-item', ZenLibraryItem);
+    }
+    window.ZenLibraryItem = ZenLibraryItem;
+
+    /**
+     * Centralized State Store (Simple Redux-like implementation)
+     */
+    class ZenStore {
+        constructor(initialState = {}) {
+            this._state = initialState;
+            this._listeners = [];
+        }
+
+        getState() {
+            return this._state;
+        }
+
+        subscribe(listener) {
+            this._listeners.push(listener);
+            return () => {
+                this._listeners = this._listeners.filter(l => l !== listener);
+            };
+        }
+
+        dispatch(action) {
+            this._state = this._reducer(this._state, action);
+            this._listeners.forEach(listener => listener(this._state));
+        }
+
+        _reducer(state, action) {
+            switch (action.type) {
+                case 'SET_DOWNLOADS':
+                    return { ...state, downloads: action.payload };
+                case 'SET_HISTORY':
+                    return { ...state, history: action.payload };
+                case 'SET_TAB':
+                    return { ...state, activeTab: action.payload };
+                default:
+                    return state;
+            }
+        }
+    }
+
+    // For now, trusting user "files will already be loaded".
 
     class ZenLibraryElement extends HTMLElement {
         constructor() {
@@ -1804,25 +231,38 @@ zen-library, #zen-library-container {
             this.attachShadow({ mode: 'open' });
             this._activeTab = (window.gZenLibrary && window.gZenLibrary.lastActiveTab) || "downloads";
             this._initialized = false;
-            this._sidebarItemEls = {};
-            this._lastWorkspaceIds = null;
-            this._folderExpansion = new Map(); // Local state: Map<id, isExpanded>
 
-            // History State
-            this._historyItems = [];
-            this._renderedItems = [];
-            this._historySearchTerm = "";
-            this._downloadsSearchTerm = "";
-            this._mediaSearchTerm = ""; // Media search state
-            this._historyBatchSize = 30; // Reduced for smoother first render
-            this._isHistoryLoading = false;
-            this._renderedCount = 0;
+            // Use shared store if available, otherwise create local (fallback)
+            this.store = (window.gZenLibrary && window.gZenLibrary.store) ? window.gZenLibrary.store : new ZenStore({
+                downloads: [],
+                history: [],
+                activeTab: 'downloads'
+            });
+
+            this._sidebarItemEls = {};
 
             try {
                 this._sessionStart = Services.startup.getStartupInfo().process.getTime();
             } catch (e) {
                 this._sessionStart = Date.now();
             }
+
+            // Use pre-initialized modules from controller if available
+            // This allows us to use cached data for instant rendering
+            const preInit = window.gZenLibrary && window.gZenLibrary.getModules ? window.gZenLibrary.getModules() : {};
+
+            // Initialize Feature Modules - reuse pre-initialized ones or create new
+            // Pass 'this' to update the library reference
+            this.downloads = preInit.downloads || (window.ZenLibraryDownloads ? new window.ZenLibraryDownloads(this) : null);
+            this.history = preInit.history || (window.ZenLibraryHistory ? new window.ZenLibraryHistory(this) : null);
+            this.media = preInit.media || (window.ZenLibraryMedia ? new window.ZenLibraryMedia(this) : null);
+            this.spaces = preInit.spaces || (window.ZenLibrarySpaces ? new window.ZenLibrarySpaces(this) : null);
+
+            // Update the library reference on pre-initialized modules so they can use our el() helper
+            if (this.downloads) this.downloads.library = this;
+            if (this.history) this.history.library = this;
+            if (this.media) this.media.library = this;
+            if (this.spaces) this.spaces.library = this;
         }
 
         get activeTab() { return this._activeTab; }
@@ -1837,11 +277,11 @@ zen-library, #zen-library-container {
         connectedCallback() {
             try {
                 if (!this._initialized) {
-                    const style = document.createElement("style");
-                    style.textContent = CSS_CONTENT;
-                    this.shadowRoot.appendChild(style);
+                    const link = document.createElement("link");
+                    link.rel = "stylesheet";
+                    link.href = _ucScriptPath.replace(/\.uc\.js(\?.*)?$/i, ".css");
+                    this.shadowRoot.appendChild(link);
 
-                    // Pull real Zen colors from the global scope into our shadow DOM
                     const updateColors = () => {
                         const rootStyle = window.getComputedStyle(document.documentElement);
                         const hoverBg = rootStyle.getPropertyValue("--zen-hover-background") ||
@@ -1851,24 +291,26 @@ zen-library, #zen-library-container {
                         }
                     };
                     updateColors();
-                    // Also update when theme might change
                     window.matchMedia("(prefers-color-scheme: dark)").addListener(updateColors);
 
+                    const container = document.createElement("div");
+                    container.className = "zen-library-container";
+
                     const sidebar = document.createElement("div");
-                    sidebar.id = "zen-library-sidebar-new";
+                    sidebar.id = "zen-library-sidebar-container";
 
                     const sidebarTop = document.createElement("div");
                     sidebarTop.className = "zen-library-sidebar-top";
                     sidebar.appendChild(sidebarTop);
 
                     const sidebarItemsContainer = document.createElement("div");
-                    sidebarItemsContainer.className = "zen-library-sidebar-items";
+                    sidebarItemsContainer.className = "sidebar-items";
                     const sidebarItems = ["downloads", "media", "history", "spaces"];
                     const parser = new DOMParser();
 
                     sidebarItems.forEach(id => {
                         const item = document.createElement("div");
-                        item.className = "sidebar-item";
+                        item.className = "sidebar-button";
                         item.dataset.id = id;
 
                         let iconSvg;
@@ -1936,22 +378,27 @@ zen-library, #zen-library-container {
                         labelSpan.textContent = id.charAt(0).toUpperCase() + id.slice(1);
                         item.appendChild(labelSpan);
 
-                        item.onclick = () => { this.activeTab = id; };
+                        item.onclick = () => {
+                            if (this.activeTab === id) {
+                                if (id === "history" && this.history && this.history.resetView) {
+                                    this.history.resetView();
+                                }
+                                this.update();
+                            }
+                            else this.activeTab = id;
+                        };
                         sidebarItemsContainer.appendChild(item);
                         this._sidebarItemEls[id] = item;
                     });
                     sidebar.appendChild(sidebarItemsContainer);
 
-                    const sidebarBottom = document.createElement("div");
-                    sidebarBottom.className = "zen-library-sidebar-bottom";
                     const exitBtn = document.createElement("div");
-                    exitBtn.className = "sidebar-item exit-btn";
+                    exitBtn.className = "sidebar-button sidebar-button-exit";
                     exitBtn.dataset.id = "exit";
                     exitBtn.innerHTML = `<div class="icon back-icon"></div><span class="label">Exit Library</span>`;
                     exitBtn.onclick = () => window.gZenLibrary.close();
-                    sidebarBottom.appendChild(exitBtn);
-                    sidebar.appendChild(sidebarBottom);
-                    this.shadowRoot.appendChild(sidebar);
+                    sidebar.appendChild(exitBtn);
+                    container.appendChild(sidebar);
 
                     const panel = document.createElement("div");
                     panel.id = "zen-library-main-panel";
@@ -1959,7 +406,8 @@ zen-library, #zen-library-container {
                         <header class="library-header"></header>
                         <div class="library-content"></div>
                     `;
-                    this.shadowRoot.appendChild(panel);
+                    container.appendChild(panel);
+                    this.shadowRoot.appendChild(container);
 
                     this._initialized = true;
                 }
@@ -1972,839 +420,28 @@ zen-library, #zen-library-container {
             }
         }
 
-        renderHistory() {
-            // Main wrapper for switcher and panes
-            const wrapper = this.el("div", {
-                className: "library-list-wrapper"
-            });
-
-            const panes = this.el("div", { className: "library-list-panes" });
-            wrapper.appendChild(panes);
-
-            // History Pane
-            const historyPane = this.el("div", { className: "history-pane" });
-            const historyContainer = this.el("div", {
-                className: "library-list-container",
-                onscroll: (e) => {
-                    const el = e.target;
-                    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
-                        this.loadMoreHistory();
-                    }
-                }
-            });
-            this._historyContainer = historyContainer;
-            historyPane.appendChild(historyContainer);
-            panes.appendChild(historyPane);
-
-            // Closed Windows Pane
-            const closedPane = this.el("div", { className: "history-pane" });
-            const closedContainer = this.el("div", { className: "library-closed-windows-container" });
-            this._closedWindowsContainer = closedContainer;
-
-            const backBtn = this.el("div", {
-                className: "history-back-button",
-                onclick: () => wrapper.classList.remove("panes-shifted")
-            }, [
-                this.el("div", { className: "back-arrow" }),
-                this.el("span", { textContent: "Back to History" })
-            ]);
-            closedPane.appendChild(backBtn);
-            closedPane.appendChild(closedContainer);
-            panes.appendChild(closedPane);
-
-            const startLoading = () => {
-                const onLoaded = () => {
-                    historyContainer.classList.add("library-content-fade-in");
-                    // Delay scrollbar visibility until history loads
-                    setTimeout(() => historyContainer.classList.add("scrollbar-visible"), 100);
-                };
-
-                // Add navigation items at the top of historyContainer
-                const navItems = document.createDocumentFragment();
-
-                const closedTabsItem = this.el("div", {
-                    className: "history-nav-item history-nav-static",
-                    onclick: () => {
-                        wrapper.classList.add("panes-shifted");
-                        this.renderClosedTabs();
-                    }
-                }, [
-                    this.el("div", { className: "nav-icon", style: "background-image: url('chrome://browser/skin/history.svg')" }),
-                    this.el("span", { className: "nav-label", textContent: "Recently closed tabs" }),
-                    this.el("div", { className: "nav-arrow" })
-                ]);
-
-                const closedWindowsItem = this.el("div", {
-                    className: "history-nav-item history-nav-static",
-                    onclick: () => {
-                        wrapper.classList.add("panes-shifted");
-                        this.renderClosedWindows();
-                    }
-                }, [
-                    this.el("div", { className: "nav-icon", style: "background-image: url('chrome://browser/skin/window.svg')" }),
-                    this.el("span", { className: "nav-label", textContent: "Recently closed windows" }),
-                    this.el("div", { className: "nav-arrow" })
-                ]);
-
-                navItems.appendChild(closedTabsItem);
-                navItems.appendChild(closedWindowsItem);
-
-                const clearItem = this.el("div", {
-                    className: "history-nav-item history-nav-static",
-                    onclick: () => {
-                        const win = Services.wm.getMostRecentWindow("browser:pure") || window;
-
-                        // 1. Try to trigger the command if found (most native way)
-                        const cmd = win.document.getElementById("Tools:Sanitize") ||
-                            win.document.getElementById("cmd_sanitizeHistory");
-                        if (cmd) {
-                            cmd.doCommand();
-                            return;
-                        }
-
-                        // 2. Fallback to global observer notification
-                        try {
-                            Services.obs.notifyObservers(null, "sanitize", "");
-                        } catch (e) { }
-
-                        // 3. Last resort fallback: open the dialog directly
-                        try {
-                            win.openDialog(
-                                "chrome://browser/content/sanitize.xhtml",
-                                "Sanitize",
-                                "chrome,modal,resizable=yes,centerscreen"
-                            );
-                        } catch (e) {
-                            console.error("ZenLibrary: Failed to open clear history dialog", e);
-                        }
-                    }
-                }, [
-                    this.el("div", { className: "nav-icon", style: "background-image: url('chrome://global/skin/icons/delete.svg')" }),
-                    this.el("span", { className: "nav-label", textContent: "Clear recent history..." })
-                ]);
-                navItems.appendChild(clearItem);
-
-                historyContainer.appendChild(navItems);
-
-                if (this._historyItems.length === 0 && !this._isHistoryLoading) {
-                    this.fetchHistory().then(() => {
-                        this.renderHistoryBatch(true); // Reset counters for new container
-                        onLoaded();
-                    });
-                } else {
-                    this.renderHistoryBatch(true); // Reset counters for new container
-                    onLoaded();
-                }
-            };
-
-            // Show centered loading placeholder
-            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" }, [
-                this.el("div", { className: "empty-icon history-icon" }),
-                this.el("h3", { textContent: "Preparing history..." }),
-                this.el("p", { textContent: "Hang tight, we're gathering your recent browsing history." })
-            ]);
-            historyContainer.appendChild(loading);
-
-            const delay = isTransitioning ? 400 : 250;
-            setTimeout(() => {
-                const l = historyContainer.querySelector(".empty-state");
-                if (l) l.remove();
-                startLoading();
-            }, delay);
-
-            return wrapper;
-        }
-
-        renderDownloads() {
-            // Main wrapper for switcher and panes
-            const wrapper = this.el("div", {
-                className: "library-list-wrapper"
-            });
-            const container = this.el("div", { className: "library-list-container" });
-            wrapper.appendChild(container);
-            this._downloadsContainer = container;
-
-            const startLoading = () => {
-                this.fetchDownloads().then(downloads => {
-                    this.renderDownloadsList(downloads);
-                    this._downloadsContainer.classList.add("library-content-fade-in");
-                    setTimeout(() => this._downloadsContainer.classList.add("scrollbar-visible"), 100);
-                });
-            };
-
-            // Show centered loading placeholder
-            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" }, [
-                this.el("div", { className: "empty-icon downloads-icon" }),
-                this.el("h3", { textContent: "Loading downloads..." }),
-                this.el("p", { textContent: "Hang tight, we're gathering your download history." })
-            ]);
-            container.appendChild(loading);
-
-            const delay = isTransitioning ? 400 : 250;
-            setTimeout(() => {
-                const l = container.querySelector(".empty-state");
-                if (l) l.remove();
-                startLoading();
-            }, delay);
-
-            return wrapper;
-        }
-
-        async fetchDownloads() {
-            try {
-                const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
-                const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
-                const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
-
-                const isPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
-                const list = await DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
-                const allDownloadsRaw = await list.getAll();
-
-                return allDownloadsRaw.map(d => {
-                    let filename = "Unknown Filename";
-                    let targetPath = "";
-                    let fileExists = false;
-
-                    if (d.target && d.target.path) {
-                        try {
-                            let file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
-                            file.initWithPath(d.target.path);
-                            fileExists = file.exists();
-                            filename = file.leafName;
-                            targetPath = d.target.path;
-                        } catch (e) {
-                            const pathParts = String(d.target.path).split(/[\\/]/);
-                            filename = pathParts.pop() || "ErrorInPathUtil";
-                        }
-                    }
-
-                    if ((filename === "Unknown Filename" || filename === "ErrorInPathUtil") && d.source && d.source.url) {
-                        try {
-                            const decodedUrl = decodeURIComponent(d.source.url);
-                            let urlObj;
-                            try {
-                                urlObj = new URL(decodedUrl);
-                                const pathSegments = urlObj.pathname.split("/");
-                                filename = pathSegments.pop() || pathSegments.pop() || "Unknown from URL Path";
-                            } catch (urlParseError) {
-                                const urlPartsDirect = String(d.source.url).split("/");
-                                const lastPartDirect = urlPartsDirect.pop() || urlPartsDirect.pop();
-                                filename = lastPartDirect.split("?")[0] || "Invalid URL Filename";
-                            }
-                        } catch (e) {
-                            const urlPartsDirect = String(d.source.url).split("/");
-                            const lastPartDirect = urlPartsDirect.pop() || urlPartsDirect.pop();
-                            filename = lastPartDirect.split("?")[0] || "Invalid URL Filename";
-                        }
-                    }
-
-                    let status = "unknown";
-                    let progressBytes = Number(d.bytesTransferredSoFar) || 0;
-                    let totalBytes = Number(d.totalBytes) || 0;
-
-                    if (d.succeeded) {
-                        status = "completed";
-                        if (d.target && d.target.size && Number(d.target.size) > totalBytes) {
-                            totalBytes = Number(d.target.size);
-                        }
-                        progressBytes = totalBytes;
-                    } else if (d.error || d.canceled) {
-                        status = "failed";
-                    } else if (d.stopped || d.hasPartialData || d.state === Downloads.STATE_PAUSED || d.state === Downloads.STATE_DOWNLOADING) {
-                        status = "paused";
-                    }
-
-                    if (status === "completed" && totalBytes === 0 && progressBytes > 0) {
-                        totalBytes = progressBytes;
-                    }
-
-                    if (d.target && d.target.path && !fileExists) {
-                        status = "deleted";
-                    }
-
-                    return {
-                        id: d.id,
-                        filename: String(filename || "FN_MISSING"),
-                        size: totalBytes,
-                        status: status,
-                        url: String(d.source?.url || "URL_MISSING"),
-                        timestamp: d.endTime || d.startTime || Date.now(),
-                        targetPath: String(targetPath || ""),
-                        raw: d
-                    };
-                }).filter(d => d.timestamp && (this._downloadsSearchTerm ? d.filename.toLowerCase().includes(this._downloadsSearchTerm.toLowerCase()) : true));
-
-            } catch (e) {
-                console.error("ZenLibrary: Error fetching downloads", e);
-                return [];
-            }
-        }
-
-        renderDownloadsList(downloads) {
-            if (!this._downloadsContainer) return;
-            this._downloadsContainer.innerHTML = "";
-            this._downloadsContainer.classList.add("scrollbar-visible");
-
-            if (downloads.length === 0) {
-                const emptyState = this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon downloads-icon" }),
-                    this.el("h3", { textContent: "No downloads found" }),
-                    this.el("p", { textContent: this._downloadsSearchTerm ? "Try a different search term." : "Your download history is empty." })
-                ]);
-                this._downloadsContainer.appendChild(emptyState);
-                return;
-            }
-
-            // Group by date
-            const groups = {};
-            const now = new Date();
-            downloads.forEach(d => {
-                const date = new Date(d.timestamp);
-                const diffTime = now - date;
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                let key = "Earlier";
-                if (diffDays === 0 && now.getDate() === date.getDate()) key = "Today";
-                else if (diffDays === 1) key = "Yesterday";
-                else if (diffDays < 7) key = date.toLocaleDateString(undefined, { weekday: "long" });
-                else if (diffDays < 30) key = "Last Month";
-
-                if (!groups[key]) groups[key] = [];
-                groups[key].push(d);
-            });
-
-            const order = ["Today", "Yesterday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Last Month", "Earlier"];
-
-            order.forEach(key => {
-                if (!groups[key]) return;
-
-                this._downloadsContainer.appendChild(this.el("div", { className: "history-section-header", textContent: key }));
-
-                groups[key].sort((a, b) => b.timestamp - a.timestamp).forEach(item => {
-                    const timeStr = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                    const row = this.el("div", {
-                        className: "library-list-item",
-                        onclick: (e) => {
-                            // Ignore clicks on the folder icon, handled separately
-                            if (e.target.closest('.item-folder-icon')) return;
-                            this.handleDownloadAction(item, "open");
-                        },
-                        oncontextmenu: (e) => {
-                            e.preventDefault();
-                            this.handleDownloadContextMenu(e, item);
-                        }
-                    }, [
-                        this.el("div", { className: "item-icon-container" }, [
-                            this.el("div", {
-                                className: "item-icon",
-                                style: `background-image: url('moz-icon://${item.targetPath}?size=32'); opacity: 1;`
-                            })
-                        ]),
-                        this.el("div", { className: "item-info" }, [
-                            this.el("div", { className: "item-title", textContent: item.filename }),
-                            this.el("div", { className: "item-url", textContent: `${this.formatBytes(item.size)} • ${item.status}` })
-                        ]),
-                        this.el("div", { className: "item-time", textContent: timeStr }),
-                        this.el("div", {
-                            className: "item-folder-icon",
-                            title: "Show in Folder",
-                            onclick: (e) => {
-                                e.stopPropagation();
-                                this.handleDownloadAction(item, "show");
-                            },
-                            innerHTML: `<div class="item-folder-mask"></div>`
-                        })
-                    ]);
-                    this._downloadsContainer.appendChild(row);
-                });
-            });
-
-            this._downloadsContainer.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-        }
-
-        renderMedia() {
-            // Main wrapper
-            const wrapper = this.el("div", {
-                className: "library-list-wrapper"
-            });
-            const container = this.el("div", { className: "media-grid" });
-            wrapper.appendChild(container);
-            this._mediaContainer = container;
-
-            // Reuse fetchDownloads but we'll filter it
-            const startLoading = () => {
-                this.fetchDownloads().then(downloads => {
-                    this.renderMediaList(downloads);
-                    this._mediaContainer.classList.add("library-content-fade-in");
-                    setTimeout(() => this._mediaContainer.classList.add("scrollbar-visible"), 100);
-                });
-            };
-
-            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" });
-
-            // Use correct Media Icon SVG (Film Strip) - Consistent 64x64
-            const iconSvg = `
-<svg class="empty-icon media-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
- <path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
- </svg>`;
-            const iconContainer = this.el("div");
-            iconContainer.innerHTML = iconSvg;
-            loading.appendChild(iconContainer.firstElementChild);
-
-            loading.appendChild(this.el("h3", { textContent: "Gathering media..." }));
-            loading.appendChild(this.el("p", { textContent: "Looking for your downloaded images and videos." }));
-
-            container.appendChild(loading);
-
-            const delay = isTransitioning ? 400 : 250;
-            setTimeout(() => {
-                const l = container.querySelector(".empty-state");
-                if (l) l.remove();
-                startLoading();
-            }, delay);
-
-            return wrapper;
-        }
-
-        renderMediaList(downloads) {
-            if (!this._mediaContainer) return;
-            this._mediaContainer.innerHTML = "";
-            this._mediaContainer.classList.add("scrollbar-visible");
-
-            const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp"];
-            const VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov"];
-
-            const mediaItems = downloads.filter(d => {
-                // Filter by extension AND valid download status (not deleted/failed)
-                if (d.status === "deleted" || d.status === "failed") return false;
-
-                const ext = d.filename.split('.').pop().toLowerCase();
-                const isMedia = IMAGE_EXTS.includes(ext) || VIDEO_EXTS.includes(ext);
-                if (!isMedia) return false;
-
-                // Search Filter
-                if (this._mediaSearchTerm && !d.filename.toLowerCase().includes(this._mediaSearchTerm.toLowerCase())) {
-                    return false;
-                }
-                return true;
-            });
-
-            // Use FILTERED count for reactive width adjustments
-            const prevCount = this._mediaItemCount;
-            this._mediaItemCount = mediaItems.length;
-            window.gZenLibraryMediaCount = this._mediaItemCount;
-
-            if (this._mediaItemCount !== prevCount) {
-                if (this.update) this.update();
-            }
-
-
-            if (mediaItems.length === 0) {
-                this._mediaContainer.innerHTML = "";
-                const emptyState = this.el("div", { className: "empty-state" }, [
-                    this.el("div", {
-                        className: "empty-icon media-icon",
-                        innerHTML: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-                    }),
-                    this.el("h3", { textContent: this._mediaSearchTerm ? "No matching media" : "No media found" }),
-                    this.el("p", { textContent: this._mediaSearchTerm ? "Try a different search term." : "We couldn't find any images or videos in your downloads." })
-                ]);
-                this._mediaContainer.appendChild(emptyState);
-                return;
-            }
-
-            // Sort by normalization timestamp
-            mediaItems.sort((a, b) => {
-                const tsA = typeof a.timestamp === 'number' ? (a.timestamp > 1e14 ? a.timestamp / 1000 : a.timestamp) : a.timestamp.getTime();
-                const tsB = typeof b.timestamp === 'number' ? (b.timestamp > 1e14 ? b.timestamp / 1000 : b.timestamp) : b.timestamp.getTime();
-                return tsB - tsA;
-            });
-
-            const masonryWrapper = this.el("div", {
-                className: "media-masonry-wrapper",
-                style: `column-count: ${ZenLibrarySpaces.calculateMediaColumns(parseFloat(this.style.getPropertyValue("--zen-library-width")) || 340)};`
-            });
-            const grid = this._mediaContainer;
-            grid.innerHTML = "";
-            grid.appendChild(masonryWrapper);
-
-            // Smooth vertical scrolling mirroring Spaces UI
-            grid.onwheel = (e) => {
-                if (e.deltaY !== 0) {
-                    e.preventDefault();
-                    if (e.deltaMode === 1) { // Line-based (Mouse Wheel)
-                        grid.scrollBy({ top: e.deltaY * 30, behavior: "smooth" });
-                    } else { // Pixel-based (Trackpad)
-                        grid.scrollTop += e.deltaY * 2;
-                    }
-                }
-            };
-
-            const fragment = document.createDocumentFragment();
-
-            mediaItems.forEach(item => {
-                const ext = item.filename.split('.').pop().toLowerCase();
-                const isVideo = VIDEO_EXTS.includes(ext);
-                const fileUrl = "file://" + item.targetPath;
-
-                const card = this.el("div", {
-                    className: "media-card",
-                    onclick: (e) => this.showMediaGlance(item, e),
-                    title: item.filename
-                });
-
-                const previewContainer = this.el("div", { className: "media-preview-container" });
-
-                if (isVideo) {
-                    const videoEl = this.el("video", {
-                        src: fileUrl,
-                        preload: "metadata",
-                        muted: true
-                    });
-                    previewContainer.appendChild(videoEl);
-
-                    // Add duration badge - top left
-                    const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
-                    videoEl.addEventListener("loadedmetadata", () => {
-                        const mins = Math.floor(videoEl.duration / 60);
-                        const secs = Math.floor(videoEl.duration % 60);
-                        durationBadge.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-                    });
-                    previewContainer.appendChild(durationBadge);
-                } else {
-                    const imgEl = this.el("img", {
-                        src: fileUrl,
-                        loading: "lazy",
-                    });
-                    previewContainer.appendChild(imgEl);
-                }
-
-                // Format timestamp
-                let timeStr = "";
-                try {
-                    let ts = item.timestamp;
-                    if (ts instanceof Date) ts = ts.getTime();
-                    if (typeof ts === 'number' && ts > 1e14) ts = ts / 1000;
-                    const date = new Date(ts);
-                    timeStr = date.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " +
-                        date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
-                } catch (e) { }
-
-                const info = this.el("div", { className: "media-info" }, [
-                    this.el("div", { className: "media-title", textContent: item.filename }),
-                    this.el("div", { className: "media-meta-row" }, [
-                        this.el("div", { className: "media-meta", textContent: this.formatBytes(item.size) }),
-                        this.el("div", { className: "media-time", textContent: timeStr })
-                    ])
-                ]);
-
-                card.appendChild(previewContainer);
-                card.appendChild(info);
-                fragment.appendChild(card);
-            });
-
-            masonryWrapper.appendChild(fragment);
-        }
-
-        showMediaGlance(item, event) {
-            const fileUrl = "file://" + item.targetPath;
-            if (window.gZenGlanceManager) {
-                // Close previous if any to allow switching
-                if (window.gZenGlanceManager.closeGlance) {
-                    window.gZenGlanceManager.closeGlance();
-                }
-
-                const rect = event.currentTarget.getBoundingClientRect();
-                window.gZenGlanceManager.openGlance({
-                    url: fileUrl,
-                    clientX: rect.left,
-                    clientY: rect.top,
-                    width: rect.width,
-                    height: rect.height
-                });
-            }
-        }
-
-        handleDownloadAction(item, action) {
-            try {
-                const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
-                file.initWithPath(item.targetPath);
-
-                if (action === "open-external") {
-                    if (file.exists()) file.launch();
-                    else alert("File does not exist.");
-                } else if (action === "show") {
-                    if (file.exists()) file.reveal();
-                    else alert("File does not exist.");
-                }
-            } catch (e) {
-                console.error("ZenLibrary: Download action failed", e);
-            }
-        }
-
-        handleDownloadContextMenu(event, item) {
-            // Create a simple custom context menu or leverage a XUL one if possible.
-            // For now, simpler is better for stability.
-            // We can rely on right-click -> show in folder behavior?
-            // Or just make clicking it open it, and maybe a small button for folder?
-            // Let's keep it simple: Click = Open.
-        }
-
-        formatBytes(bytes, decimals = 2) {
-            if (!+bytes || bytes === 0) return "0 Bytes";
-            const k = 1024;
-            const dm = decimals < 0 ? 0 : decimals;
-            const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-        }
-
-
-        renderClosedWindows() {
-            if (!this._closedWindowsContainer) return;
-            this._closedWindowsContainer.innerHTML = "";
-            this._closedWindowsContainer.classList.remove("scrollbar-visible");
-
-            const closedData = SessionStore.getClosedWindowData();
-            if (closedData.length === 0) {
-                this._closedWindowsContainer.appendChild(this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon history-icon" }),
-                    this.el("h3", { textContent: "No recently closed windows" }),
-                    this.el("p", { textContent: "Closed windows will appear here." })
-                ]));
-                return;
-            }
-
-            const fragment = document.createDocumentFragment();
-            fragment.appendChild(this.el("div", { className: "history-section-header", textContent: "Closed Windows" }));
-
-            closedData.forEach((win, index) => {
-                const tabsCount = win.tabs.length;
-                const title = win.title || `Window with ${tabsCount} tabs`;
-
-                const row = this.el("div", {
-                    className: "library-list-item",
-                    onclick: () => {
-                        SessionStore.undoCloseWindow(index);
-                        window.gZenLibrary.close();
-                    }
-                }, [
-                    this.el("div", { className: "item-icon-container" }, [
-                        this.el("div", { className: "item-icon", style: "background-image: url('chrome://browser/skin/window.svg'); opacity: 0.6;" })
-                    ]),
-                    this.el("div", { className: "item-info" }, [
-                        this.el("div", { className: "item-title", textContent: title }),
-                        this.el("div", { className: "item-url", textContent: `${tabsCount} tabs` })
-                    ])
-                ]);
-                fragment.appendChild(row);
-            });
-
-            this._closedWindowsContainer.appendChild(fragment);
-            this._closedWindowsContainer.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-
-            // Fade in and show scrollbar after render
-            this._closedWindowsContainer.classList.add("library-content-fade-in");
-            setTimeout(() => this._closedWindowsContainer.classList.add("scrollbar-visible"), 100);
-        }
-
-        renderClosedTabs() {
-            if (!this._closedWindowsContainer) return;
-            const container = this._closedWindowsContainer;
-            container.innerHTML = "";
-            container.classList.remove("scrollbar-visible");
-
-            const closedData = SessionStore.getClosedTabData(window);
-            if (closedData.length === 0) {
-                container.appendChild(this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon history-icon" }),
-                    this.el("h3", { textContent: "No recently closed tabs" }),
-                    this.el("p", { textContent: "Tabs you close will appear here." })
-                ]));
-                return;
-            }
-
-            const fragment = document.createDocumentFragment();
-            fragment.appendChild(this.el("div", { className: "history-section-header", textContent: "Closed Tabs" }));
-
-            closedData.forEach((tabData, index) => {
-                const title = tabData.title || tabData.state.entries[tabData.state.index - 1].title;
-                const url = tabData.state.entries[tabData.state.index - 1].url;
-
-                const row = this.el("div", {
-                    className: "library-list-item",
-                    onclick: () => {
-                        SessionStore.undoCloseTab(window, index);
-                        window.gZenLibrary.close();
-                    }
-                }, [
-                    this.el("div", { className: "item-icon-container" }, [
-                        this.el("div", { className: "item-icon", style: `background-image: url('page-icon:${url}');` })
-                    ]),
-                    this.el("div", { className: "item-info" }, [
-                        this.el("div", { className: "item-title", textContent: title }),
-                        this.el("div", { className: "item-url", textContent: url })
-                    ])
-                ]);
-                fragment.appendChild(row);
-            });
-
-            container.appendChild(fragment);
-            container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-
-            container.classList.add("library-content-fade-in");
-            setTimeout(() => container.classList.add("scrollbar-visible"), 100);
-        }
-
-        async fetchHistory() {
-            this._isHistoryLoading = true;
-            try {
-                const { PlacesUtils } = ChromeUtils.importESModule("resource://gre/modules/PlacesUtils.sys.mjs");
-                const query = PlacesUtils.history.getNewQuery();
-                const options = PlacesUtils.history.getNewQueryOptions();
-                options.sortingMode = options.SORT_BY_DATE_DESCENDING;
-                options.maxResults = 500;
-
-                const result = PlacesUtils.history.executeQuery(query, options);
-                const root = result.root;
-                root.containerOpen = true;
-
-                this._historyItems = [];
-                for (let i = 0; i < root.childCount; i++) {
-                    const node = root.getChild(i);
-                    this._historyItems.push({
-                        uri: node.uri,
-                        title: node.title || node.uri,
-                        time: node.time,
-                        timeStr: new Date(node.time / 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                        dateStr: new Date(node.time / 1000).toLocaleDateString("en-GB", { day: '2-digit', month: '2-digit', year: 'numeric' }) // DD/MM/YYYY
-                    });
-                }
-                root.containerOpen = false;
-            } catch (e) {
-                console.error("ZenLibrary History Fetch Error:", e);
-            } finally {
-                this._isHistoryLoading = false;
-            }
-        }
-
-        renderHistoryBatch(reset = true) {
-            if (!this._historyContainer) return;
-
-            if (reset) {
-                // Keep ONLY the static navigation items
-                const navItems = this._historyContainer.querySelectorAll(".history-nav-static");
-                this._historyContainer.innerHTML = "";
-                navItems.forEach(i => this._historyContainer.appendChild(i));
-                this._renderedCount = 0;
-                this._lastGroupLabel = null;
-            }
-
-            const filtered = this._historySearchTerm
-                ? this._historyItems.filter(i =>
-                    i.title.toLowerCase().includes(this._historySearchTerm.toLowerCase()) ||
-                    i.uri.toLowerCase().includes(this._historySearchTerm.toLowerCase())
-                )
-                : this._historyItems;
-
-            if (filtered.length === 0 && !this._isHistoryLoading) {
-                this._historyContainer.innerHTML = `<div class="history-section-header">No results found</div>`;
-                return;
-            }
-
-            const nextBatch = filtered.slice(this._renderedCount, this._renderedCount + this._historyBatchSize);
-            if (nextBatch.length === 0) return;
-
-            const fragment = document.createDocumentFragment();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
-
-            nextBatch.forEach(item => {
-                const timeMs = item.time / 1000;
-                let groupLabel = "";
-
-                if (this._historySearchTerm) {
-                    groupLabel = "Search Results";
-                } else {
-                    const d = new Date(timeMs);
-                    d.setHours(0, 0, 0, 0);
-                    if (d.getTime() === today.getTime()) groupLabel = "Today";
-                    else if (d.getTime() === yesterday.getTime()) groupLabel = "Yesterday";
-                    else groupLabel = new Date(timeMs).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-                }
-
-                if (groupLabel !== this._lastGroupLabel) {
-                    fragment.appendChild(this.el("div", {
-                        className: "history-section-header",
-                        textContent: groupLabel
-                    }));
-                    this._lastGroupLabel = groupLabel;
-                }
-
-                const displayTime = (this._historySearchTerm || (this._lastGroupLabel !== "Recently Visited (Session)" && this._lastGroupLabel !== "Today" && this._lastGroupLabel !== "Yesterday"))
-                    ? item.dateStr
-                    : item.timeStr;
-
-                const row = this.el("div", {
-                    className: "library-list-item",
-                    onclick: () => {
-                        window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
-                            triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                        });
-                    }
-                }, [
-                    this.el("div", { className: "item-icon-container" }, [
-                        this.el("div", {
-                            className: "item-icon",
-                            style: `background-image: url("page-icon:${item.uri}");`
-                        })
-                    ]),
-                    this.el("div", { className: "item-info" }, [
-                        this.el("div", { className: "item-title", textContent: item.title }),
-                        this.el("div", { className: "item-url", textContent: item.uri })
-                    ]),
-                    this.el("div", { className: "item-time", textContent: displayTime })
-                ]);
-                fragment.appendChild(row);
-            });
-
-            this._renderedCount += nextBatch.length;
-
-            // Remove old spacer
-            const oldSpacer = this._historyContainer.querySelector(".history-bottom-spacer");
-            if (oldSpacer) oldSpacer.remove();
-
-            this._historyContainer.appendChild(fragment);
-
-            // Add new spacer at the end
-            this._historyContainer.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-        }
-
-        loadMoreHistory() {
-            this.renderHistoryBatch(false);
-        }
-
-
         update() {
             try {
-                const { workspaces, width } = ZenLibrarySpaces.getData();
+                // Common width calculation
+                // We can rely on Spaces module or default fallback
                 let targetWidth = 340;
+                // Assuming ZenLibrarySpaces is available on window if Spaces module loaded
+                if (this.activeTab === "spaces" && window.ZenLibrarySpaces) {
+                    const ws = window.ZenLibrarySpaces.getWorkspaces();
+                    targetWidth = window.ZenLibrarySpaces.calculatePanelWidth(ws.length);
+                } else if (this.activeTab === "media") {
+                    const count = window.gZenLibraryMediaCount ?? 0;
+                    if (window.ZenLibrarySpaces && window.ZenLibrarySpaces.calculateMediaWidth) {
+                        targetWidth = window.ZenLibrarySpaces.calculateMediaWidth(count);
+                    } else {
+                        // Fallback logic if module missing
+                        const widthCalc = 340; // Default
+                        targetWidth = widthCalc;
+                    }
+                }
 
                 const startWidthStyle = this.style.getPropertyValue("--zen-library-start-width");
                 const startWidth = startWidthStyle ? parseInt(startWidthStyle) : 0;
-
-                if (this.activeTab === "spaces") {
-                    targetWidth = width;
-                } else if (this.activeTab === "media") {
-                    const count = window.gZenLibraryMediaCount ?? 0;
-                    targetWidth = ZenLibrarySpaces.calculateMediaWidth(count);
-                }
-
                 const offset = targetWidth - startWidth;
 
                 this.style.setProperty("--zen-library-width", `${targetWidth}px`);
@@ -2814,30 +451,35 @@ zen-library, #zen-library-container {
                     this._sidebarItemEls[id].classList.toggle("active", id === this.activeTab);
                 }
 
-                // Incremental Update: Only clear if tab changed or content is missing
                 const content = this.shadowRoot.querySelector(".library-content");
                 const header = this.shadowRoot.querySelector(".library-header");
-
                 const tabChanged = this._lastRenderedTab !== this.activeTab;
                 this._lastRenderedTab = this.activeTab;
 
+                // Header / Search Bar Logic
                 if (this.activeTab !== "spaces") {
                     if (tabChanged || !header.firstElementChild) {
                         header.innerHTML = "";
+                        let val = "";
+                        if (this.history && this.activeTab === "history") val = this.history._searchTerm;
+                        else if (this.downloads && this.activeTab === "downloads") val = this.downloads._searchTerm;
+                        else if (this.media && this.activeTab === "media") val = this.media._searchTerm;
+
                         const searchInput = this.el("input", {
                             type: "text",
                             placeholder: `Search ${this.activeTab.charAt(0).toUpperCase() + this.activeTab.slice(1)}...`,
-                            value: this.activeTab === "history" ? this._historySearchTerm : (this.activeTab === "downloads" ? this._downloadsSearchTerm : (this.activeTab === "media" ? this._mediaSearchTerm : "")),
+                            value: val,
                             oninput: (e) => {
-                                if (this.activeTab === "history") {
-                                    this._historySearchTerm = e.target.value;
-                                    this.renderHistoryBatch(true);
-                                } else if (this.activeTab === "downloads") {
-                                    this._downloadsSearchTerm = e.target.value;
-                                    this.fetchDownloads().then(downloads => this.renderDownloadsList(downloads));
-                                } else if (this.activeTab === "media") {
-                                    this._mediaSearchTerm = e.target.value;
-                                    this.fetchDownloads().then(downloads => this.renderMediaList(downloads));
+                                const v = e.target.value;
+                                if (this.activeTab === "history" && this.history) {
+                                    this.history._searchTerm = v;
+                                    this.history.renderBatch(true);
+                                } else if (this.activeTab === "downloads" && this.downloads) {
+                                    this.downloads._searchTerm = v;
+                                    this.downloads.fetchDownloads().then(d => this.downloads.renderList(d));
+                                } else if (this.activeTab === "media" && this.media) {
+                                    this.media._searchTerm = v;
+                                    this.media.fetchDownloads().then(d => this.media.renderList(d));
                                 }
                             }
                         });
@@ -2853,96 +495,58 @@ zen-library, #zen-library-container {
                     header.innerHTML = "";
                 }
 
-                if (this.activeTab === "spaces") {
-                    const workspaceHash = workspaces.map(ws => ws.uuid + (ws.tabsLength || 0)).join("|");
-                    if (!tabChanged && this._lastWorkspaceHash === workspaceHash) {
-                        return; // Nothing to do
-                    }
-                    this._lastWorkspaceHash = workspaceHash;
+                // Content Rendering via Feature Modules
+                let elToAppend = null;
+                let needsAppend = false;
 
-                    // Capture existing scroll position
-                    const oldGrid = this.shadowRoot.querySelector(".library-workspace-grid");
-                    const oldScroll = oldGrid ? oldGrid.scrollLeft : 0;
+                // Lazy load features if they weren't available during constructor
+                if (!this.downloads && window.ZenLibraryDownloads) this.downloads = new window.ZenLibraryDownloads(this);
+                if (!this.history && window.ZenLibraryHistory) this.history = new window.ZenLibraryHistory(this);
+                if (!this.media && window.ZenLibraryMedia) this.media = new window.ZenLibraryMedia(this);
+                if (!this.spaces && window.ZenLibrarySpaces) this.spaces = new window.ZenLibrarySpaces(this);
 
-                    const grid = this.el("div", { className: "library-workspace-grid" });
-                    const fragment = document.createDocumentFragment();
-
-                    for (const ws of workspaces) {
-                        const card = this.createWorkspaceCard(ws);
-                        if (card) fragment.appendChild(card);
-                    }
-
-                    // Add "Create Space" button at end of grid
-                    fragment.appendChild(this.el("div", {
-                        className: "library-create-workspace-button",
-                        title: "Create Space",
-                        onclick: () => {
-                            window.gZenLibrary.close();
-                            const creationCmd = document.getElementById("cmd_zenOpenWorkspaceCreation");
-                            if (creationCmd) creationCmd.doCommand();
-                        }
-                    }, [
-                        this.el("span", { textContent: "+" })
-                    ]));
-
-                    grid.appendChild(fragment);
-
-                    // Optimized wheel handling
-                    grid.onwheel = (e) => {
-                        const list = e.target.closest(".library-workspace-card-list");
-                        let shouldScrollHorizontal = !list;
-                        if (list) {
-                            const isAtTop = list.scrollTop <= 0 && e.deltaY < 0;
-                            const isAtBottom = Math.abs(list.scrollHeight - list.scrollTop - list.clientHeight) < 1 && e.deltaY > 0;
-                            if (isAtTop || isAtBottom) shouldScrollHorizontal = true;
-                        }
-
-                        if (e.deltaY !== 0 && shouldScrollHorizontal) {
-                            e.preventDefault();
-                            if (e.deltaMode === 1) grid.scrollBy({ left: e.deltaY * 30, behavior: "smooth" });
-                            else grid.scrollLeft += e.deltaY * 1.5;
-                        }
-                    };
-
-                    content.innerHTML = "";
-                    content.appendChild(grid);
-                    grid.classList.add("library-content-fade-in");
-
-                    // Restore scroll position
-                    if (oldScroll > 0) {
-                        requestAnimationFrame(() => { grid.scrollLeft = oldScroll; });
-                    }
-
-                    requestAnimationFrame(() => grid.classList.add("scrollbar-visible"));
-                } else if (this.activeTab === "history") {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
-                        const historyEl = this.renderHistory();
-                        content.innerHTML = "";
-                        content.appendChild(historyEl);
-                    }
-                } else if (this.activeTab === "downloads") {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
-                        const downloadsEl = this.renderDownloads();
-                        content.innerHTML = "";
-                        content.appendChild(downloadsEl);
-                    }
-                } else if (this.activeTab === "media") {
-                    if (!content.querySelector(".media-grid") || tabChanged) {
-                        const mediaEl = this.renderMedia();
-                        content.innerHTML = "";
-                        content.appendChild(mediaEl);
-                    }
-                } else {
-                    content.innerHTML = `<div class="empty-state library-content-fade-in">
-                        <div class="empty-icon ${this.activeTab}-icon"></div>
-                        <h3>Nothing here yet!</h3>
-                        <p>Content for ${this.activeTab} will be displayed here once available.</p>
-                      </div>`;
+                if (this.activeTab === "spaces" && this.spaces) {
+                    // Spaces has its own intelligent re-render check usually
+                    // But for now we delegate completely
+                    elToAppend = this.spaces.render();
+                    // Optimization: Spaces.render checks if container exists
+                    needsAppend = true; // Always append correctly returned wrapper
                 }
+                else if (this.activeTab === "history" && this.history) {
+                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                        elToAppend = this.history.render();
+                        needsAppend = true;
+                    }
+                }
+                else if (this.activeTab === "downloads" && this.downloads) {
+                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                        elToAppend = this.downloads.render();
+                        needsAppend = true;
+                    }
+                }
+                else if (this.activeTab === "media" && this.media) {
+                    if (!content.querySelector(".media-grid") || tabChanged) {
+                        elToAppend = this.media.render();
+                        needsAppend = true;
+                    }
+                }
+
+                if (needsAppend && elToAppend) {
+                    content.innerHTML = "";
+                    content.appendChild(elToAppend);
+                } else if (!this[this.activeTab] && !elToAppend && tabChanged) {
+                    // Fallback if module missing
+                    content.innerHTML = `<div class="empty-state library-content-fade-in">
+                         <div class="empty-icon ${this.activeTab}-icon"></div>
+                         <h3>Feature not available</h3>
+                         <p>The ${this.activeTab} module is not loaded.</p>
+                       </div>`;
+                }
+
             } catch (e) {
                 console.error("ZenLibrary Error in update:", e);
-                // content is already declared in function scope
-                if (content) content.innerHTML = `<div style="color:red; padding:20px;">Error loading library content. Check console.</div>`;
+                const content = this.shadowRoot.querySelector(".library-content");
+                if (content) content.innerHTML = `<div style="color:red; padding:20px;">Error loading content: ${e.message}</div>`;
             }
         }
 
@@ -2965,7 +569,6 @@ zen-library, #zen-library-container {
 
             if (dataset) Object.assign(el.dataset, dataset);
 
-            // Remaining props (mostly event listeners or attributes)
             for (const key in other) {
                 if (key.startsWith('on')) el[key] = other[key];
                 else el.setAttribute(key, other[key]);
@@ -2999,634 +602,10 @@ zen-library, #zen-library-container {
             }
             return null;
         }
-
-        // --- LITERAL 1:1 MIRROR FROM ZenFolder.mjs/Nebula ---
-        createFolderIconSVG(iconURL = '', state = 'close', active = false) {
-            const id1 = "nebula-native-grad-0-" + Math.floor(Math.random() * 100000);
-            const id2 = "nebula-native-grad-1-" + Math.floor(Math.random() * 100000);
-
-            let imageTag = "";
-            if (iconURL) {
-                imageTag = `<image href="${iconURL}" height="10" width="10" transform="translate(9 11)" />`;
-            }
-
-            const svgStr = `
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" state="${state}" active="${active}">
-                <defs>
-                    <linearGradient gradientUnits="userSpaceOnUse" x1="14" y1="5.625" x2="14" y2="22.375" id="${id1}">
-                        <stop offset="0" style="stop-color: rgb(255, 255, 255)"/>
-                        <stop offset="1" style="stop-color: rgb(0, 0, 0)"/>
-                    </linearGradient>
-                    <linearGradient gradientUnits="userSpaceOnUse" x1="14" y1="9.625" x2="14" y2="22.375" id="${id2}">
-                        <stop offset="0" style="stop-color: rgb(255, 255, 255)"/>
-                        <stop offset="1" style="stop-color: rgb(0, 0, 0)"/>
-                    </linearGradient>
-                </defs>
-                <path class="back" d="M8 5.625H11.9473C12.4866 5.625 13.0105 5.80861 13.4316 6.14551L14.2881 6.83105C14.9308 7.34508 15.7298 7.625 16.5527 7.625H20C21.3117 7.625 22.375 8.68832 22.375 10V20C22.375 21.3117 21.3117 22.375 20 22.375H8C6.68832 22.375 5.625 21.3117 5.625 20V8C5.625 6.68832 6.68832 5.625 8 5.625Z" style="fill: var(--ws-folder-behind);" />
-                <path class="back" d="M8 5.625H11.9473C12.4866 5.625 13.0105 5.80861 13.4316 6.14551L14.2881 6.83105C14.9308 7.34508 15.7298 7.625 16.5527 7.625H20C21.3117 7.625 22.375 8.68832 22.375 10V20C22.375 21.3117 21.3117 22.375 20 22.375H8C6.68832 22.375 5.625 21.3117 5.625 20V8C5.625 6.68832 6.68832 5.625 8 5.625Z" style="stroke-width: 1.5px; stroke: var(--ws-folder-stroke); fill: url(#${id1}); fill-opacity: 0.1;" />
-                <rect class="front" x="5.625" y="9.625" width="16.75" height="12.75" rx="2.375" style="fill: var(--ws-folder-front);" />
-                <rect class="front" x="5.625" y="9.625" width="16.75" height="12.75" rx="2.375" style="stroke-width: 1.5px; stroke: var(--ws-folder-stroke); fill: url(#${id2}); fill-opacity: 0.1;" />
-                <g class="icon" style="fill: var(--ws-folder-stroke, currentColor);">
-                     ${imageTag}
-                </g>
-                <g class="dots" style="fill: var(--ws-folder-stroke);">
-                    <ellipse cx="10" cy="16" rx="1.25" ry="1.25"/>
-                    <ellipse cx="14" cy="16" rx="1.25" ry="1.25"/>
-                    <ellipse cx="18" cy="16" rx="1.25" ry="1.25"/>
-                </g>
-            </svg>`;
-            return this.svg(svgStr);
-        }
-
-        createWorkspaceCard(ws) {
-            try {
-                if (!window.gZenWorkspaces) return null;
-
-                let themeData = { gradient: "var(--zen-primary-color)", grain: 0, primaryColor: "var(--zen-primary-color)", isDarkMode: true, toolbarColor: [255, 255, 255, 0.6] };
-                if (window.gZenThemePicker && window.gZenThemePicker.getGradientForWorkspace) {
-                    themeData = window.gZenThemePicker.getGradientForWorkspace(ws);
-                }
-
-                const card = this.el("div", { className: "library-workspace-card" });
-                card.style.setProperty("--ws-gradient", themeData.gradient);
-                card.style.setProperty("--ws-grain", themeData.grain);
-
-                const pColor = themeData.primaryColor;
-                const tColor = `rgba(${themeData.toolbarColor.join(',')})`;
-
-                card.style.setProperty("--ws-primary-color", pColor);
-                card.style.setProperty("--ws-text-color", tColor);
-                card.style.colorScheme = themeData.isDarkMode ? "dark" : "light";
-
-                // Native Zen Tab Highlights (formula from Zen vertical-tabs.css and zen-theme.css)
-                if (themeData.isDarkMode) {
-                    card.style.setProperty("--ws-tab-selected-color", "rgba(255, 255, 255, 0.12)");
-                    card.style.setProperty("--ws-tab-selected-shadow", "0 1px 1px 1px rgba(0, 0, 0, 0.1)");
-                } else {
-                    card.style.setProperty("--ws-tab-selected-color", "rgba(255, 255, 255, 0.8)");
-                    card.style.setProperty("--ws-tab-selected-shadow", "0 1px 1px 1px rgba(0, 0, 0, 0.09)");
-                }
-                card.style.setProperty("--ws-tab-hover-color", `color-mix(in srgb, ${tColor}, transparent 92.5%)`);
-
-                if (themeData.isDarkMode) {
-                    card.style.setProperty("--ws-folder-front", `color-mix(in srgb, ${pColor}, black 40%)`);
-                    card.style.setProperty("--ws-folder-behind", `color-mix(in srgb, ${pColor} 60%, #c1c1c1)`);
-                    card.style.setProperty("--ws-folder-stroke", `color-mix(in srgb, ${pColor} 15%, #ebebeb)`);
-                } else {
-                    card.style.setProperty("--ws-folder-front", `color-mix(in srgb, ${pColor}, white 70%)`);
-                    card.style.setProperty("--ws-folder-behind", `color-mix(in srgb, ${pColor} 60%, gray)`);
-                    card.style.setProperty("--ws-folder-stroke", `color-mix(in srgb, ${pColor} 50%, black)`);
-                }
-
-                if (themeData.isDarkMode) card.classList.add("dark");
-
-                let iconEl;
-                if (ws.icon && (ws.icon.includes("/") || ws.icon.startsWith("data:"))) {
-                    // For SVG icons, we use background+mask to allow theme coloring
-                    iconEl = this.el("div", {
-                        className: "library-workspace-icon",
-                        style: `mask-image: url("${ws.icon}");`
-                    });
-                } else if (ws.icon && ws.icon.trim().length > 0) {
-                    iconEl = this.el("span", { textContent: ws.icon, className: "library-workspace-icon-text" });
-                } else {
-                    iconEl = this.el("div", { className: "library-workspace-icon-empty" });
-                }
-
-                const editBtn = this.el("div", {
-                    className: "library-workspace-edit-button",
-                    title: "Edit Workspace"
-                }, [this.el("div")]);
-
-                editBtn.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    const popup = document.getElementById("zenWorkspaceMoreActions");
-                    if (popup) {
-                        // Crucially set the workspace ID so the popup knows which one to edit
-                        popup.setAttribute("workspace-id", ws.uuid);
-                        popup.openPopup(e.currentTarget, "after_start");
-                        console.log("[ZenLib v2.7] Opening edit menu for:", ws.uuid);
-                    }
-                });
-
-                const header = this.el("div", { className: "library-workspace-card-header" }, [
-                    this.el("div", { className: "library-workspace-icon-container" }, [iconEl]),
-                    this.el("span", { className: "library-workspace-name", textContent: ws.name }),
-                    editBtn
-                ]);
-
-                const listContainer = this.el("div", { className: "library-workspace-card-list" });
-                const wsEl = window.gZenWorkspaces.workspaceElement(ws.uuid);
-                if (wsEl) {
-                    const pinnedContainer = wsEl.pinnedTabsContainer;
-                    const normalContainer = wsEl.tabsContainer;
-
-                    const items = [];
-                    const collect = (container) => {
-                        if (!container) return;
-                        Array.from(container.children).forEach(child => {
-                            if (child.hasAttribute('cloned') || child.hasAttribute('zen-empty-tab')) return;
-                            if (window.gBrowser.isTab(child) || window.gBrowser.isTabGroup(child)) {
-                                items.push(child);
-                            }
-                        });
-                    };
-
-                    collect(pinnedContainer);
-                    const pinnedCount = items.length;
-                    collect(normalContainer);
-
-                    let separatorCreated = false;
-                    const itemsLen = items.length;
-                    for (let i = 0; i < itemsLen; i++) {
-                        const item = items[i];
-                        if (i === pinnedCount && !separatorCreated) {
-                            const cleanupBtn = this.el("div", {
-                                className: "library-workspace-cleanup-button",
-                                title: "Clear unpinned tabs"
-                            }, [this.el("span", { textContent: "Clear" })]);
-
-                            cleanupBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                this.closeWorkspaceUnpinnedTabs(ws.uuid);
-                            });
-
-                            const separatorContainer = this.el("div", { className: "library-workspace-separator-container" }, [
-                                this.el("div", { className: "library-workspace-separator" }),
-                                cleanupBtn
-                            ]);
-                            listContainer.appendChild(separatorContainer);
-                            separatorCreated = true;
-                        }
-                        this.renderItemRecursive(item, listContainer, ws.uuid);
-                    }
-
-                    if (itemsLen === 0) {
-                        listContainer.appendChild(this.el("div", {
-                            className: "empty-state",
-                            style: "padding: 20px; text-align:center; opacity:0.5; font-size: 12px;",
-                            textContent: "Empty Workspace"
-                        }));
-                    }
-                }
-
-                const dragHandle = this.el("div", {
-                    className: "library-workspace-drag-handle",
-                    textContent: "⠿",
-                    title: "Drag to reorder"
-                });
-
-                dragHandle.addEventListener("mousedown", (e) => {
-                    if (e.button !== 0) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    const grid = card.parentElement;
-                    if (!grid) return;
-
-                    // Create GLOBAL DRAG OVERLAY to capture events across webviews
-                    const overlay = this.el("div", {
-                        id: "library-drag-overlay",
-                        style: "position: fixed; inset: 0; z-index: 9998; cursor: grabbing; pointer-events: auto;"
-                    });
-                    document.body.appendChild(overlay);
-
-                    // Capture pre-drag dimensions
-                    const preDragRect = card.getBoundingClientRect();
-
-                    // Apply dragged state to trigger CSS transition/scale
-                    card.style.setProperty('--dragged-bg-color', ws.primaryColor);
-                    card.setAttribute("dragged", "true");
-                    grid.setAttribute("dragging-workspace", "true");
-
-                    // Create placeholder
-                    const placeholder = this.el("div", { className: "library-workspace-card-placeholder" });
-                    grid.insertBefore(placeholder, card);
-
-                    // Pin card to original dimensions (CSS transform handles the 1.05 scale)
-                    card.style.width = preDragRect.width + "px";
-                    card.style.height = preDragRect.height + "px";
-
-                    const gridRectAtStart = grid.getBoundingClientRect();
-                    // Initial local position relative to grid frame
-                    card.style.left = (preDragRect.left - gridRectAtStart.left) + "px";
-                    card.style.top = (preDragRect.top - gridRectAtStart.top) + "px";
-
-                    // Force reflow and calculate offset based on the NEW SCALED dimensions (instantly scaled due to transition: none)
-                    void card.offsetWidth;
-                    const scaledRect = card.getBoundingClientRect();
-                    const initialOffsetX = e.clientX - scaledRect.left;
-                    const initialOffsetY = e.clientY - scaledRect.top;
-
-                    const originalIndex = Array.from(grid.children).indexOf(placeholder);
-
-                    // FLIP Animation helper
-                    const animateSiblings = () => {
-                        const siblings = Array.from(grid.children).filter(s => s !== card);
-                        const firstRects = new Map();
-                        siblings.forEach(s => firstRects.set(s, s.getBoundingClientRect()));
-
-                        // Placeholder has already moved or about to move
-                        // This function should be called AFTER DOM movement
-
-                        requestAnimationFrame(() => {
-                            siblings.forEach(s => {
-                                const lastRect = s.getBoundingClientRect();
-                                const firstRect = firstRects.get(s);
-                                if (!firstRect) return;
-
-                                const dx = firstRect.left - lastRect.left;
-                                const dy = firstRect.top - lastRect.top;
-
-                                if (dx || dy) {
-                                    s.style.transition = "none";
-                                    s.style.transform = `translate(${dx}px, ${dy}px)`;
-                                    s.getBoundingClientRect(); // force reflow
-                                    s.style.transition = "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)";
-                                    s.style.transform = "";
-                                }
-                            });
-                        });
-                    };
-
-                    // Initial follow variables
-                    let currentX = preDragRect.left;
-                    let currentY = preDragRect.top;
-                    let targetX = preDragRect.left;
-                    let targetY = preDragRect.top;
-                    let isDragging = true;
-                    let isLanding = false;
-                    let mouseX = e.clientX;
-                    let mouseY = e.clientY;
-
-                    const finalizeDrop = () => {
-                        isDragging = false;
-                        isLanding = false;
-                        overlay.remove();
-
-                        grid.removeAttribute("dragging-workspace");
-
-                        // Clean up sibling transitions
-                        Array.from(grid.children).forEach(s => {
-                            s.style.transition = "";
-                            s.style.transform = "";
-                        });
-
-                        // Final placement
-                        grid.insertBefore(card, placeholder);
-                        card.removeAttribute("dragged");
-                        card.style.width = "";
-                        card.style.height = "";
-                        card.style.left = "";
-                        card.style.top = "";
-                        card.style.backgroundColor = "";
-
-                        const newIndex = Array.from(grid.children).indexOf(card);
-                        placeholder.remove();
-
-                        if (newIndex !== originalIndex) {
-                            console.log(`[ZenLib v5.6] Reordering workspace ${ws.uuid} to index ${newIndex}`);
-                            if (window.gZenWorkspaces && window.gZenWorkspaces.reorderWorkspace) {
-                                window.gZenWorkspaces.reorderWorkspace(ws.uuid, newIndex);
-                                setTimeout(() => this.update(), 100);
-                            }
-                        }
-                    };
-
-                    const moveLoop = () => {
-                        if (!isDragging && !isLanding) return;
-
-                        // Lerp for smooth follow
-                        const lerpFactor = isLanding ? 0.25 : 0.18;
-                        currentX += (targetX - currentX) * lerpFactor;
-                        currentY += (targetY - currentY) * lerpFactor;
-
-                        // Compensate for transformed containing block
-                        const currentGridRect = grid.getBoundingClientRect();
-                        card.style.left = (currentX - currentGridRect.left) + "px";
-                        card.style.top = (currentY - currentGridRect.top) + "px";
-
-                        if (isLanding) {
-                            const dist = Math.hypot(targetX - currentX, targetY - currentY);
-                            if (dist < 0.5) {
-                                finalizeDrop();
-                                return;
-                            }
-                        } else {
-                            // Smooth velocity-based auto-scroll
-                            const scrollThreshold = 150;
-                            if (mouseX < currentGridRect.left + scrollThreshold) {
-                                const intensity = Math.pow((currentGridRect.left + scrollThreshold - mouseX) / scrollThreshold, 2);
-                                grid.scrollLeft -= intensity * 25;
-                            } else if (mouseX > currentGridRect.right - scrollThreshold) {
-                                const intensity = Math.pow((mouseX - (currentGridRect.right - scrollThreshold)) / scrollThreshold, 2);
-                                grid.scrollLeft += intensity * 25;
-                            }
-                        }
-
-                        requestAnimationFrame(moveLoop);
-                    };
-
-                    const onMouseMove = (moveEvent) => {
-                        mouseX = moveEvent.clientX;
-                        mouseY = moveEvent.clientY;
-                        targetX = mouseX - initialOffsetX;
-                        targetY = mouseY - initialOffsetY;
-
-                        const children = grid.children;
-                        for (let i = 0; i < children.length; i++) {
-                            const sib = children[i];
-                            if (sib === card || sib === placeholder) continue;
-                            const r = sib.getBoundingClientRect();
-                            if (mouseX > r.left && mouseX < r.right) {
-                                const halfway = r.left + r.width / 2;
-                                if (mouseX < halfway) {
-                                    if (placeholder.nextSibling !== sib) {
-                                        const sibItems = Array.from(grid.children).filter(s => s !== card);
-                                        const firstRects = new Map();
-                                        for (const s of sibItems) firstRects.set(s, s.getBoundingClientRect());
-
-                                        grid.insertBefore(placeholder, sib);
-
-                                        for (const s of sibItems) {
-                                            const lastRect = s.getBoundingClientRect();
-                                            const firstRect = firstRects.get(s);
-                                            const dx = firstRect.left - lastRect.left;
-                                            const dy = firstRect.top - lastRect.top;
-                                            if (dx || dy) {
-                                                const sStyle = s.style;
-                                                sStyle.transition = "none";
-                                                sStyle.transform = `translate(${dx}px, ${dy}px)`;
-                                                s.getBoundingClientRect();
-                                                sStyle.transition = "transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)";
-                                                sStyle.transform = "translate(0,0)";
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    if (sib.nextSibling !== placeholder) {
-                                        const sibItems = Array.from(grid.children).filter(s => s !== card);
-                                        const firstRects = new Map();
-                                        for (const s of sibItems) firstRects.set(s, s.getBoundingClientRect());
-
-                                        grid.insertBefore(placeholder, sib.nextSibling);
-
-                                        for (const s of sibItems) {
-                                            const lastRect = s.getBoundingClientRect();
-                                            const firstRect = firstRects.get(s);
-                                            const dx = firstRect.left - lastRect.left;
-                                            const dy = firstRect.top - lastRect.top;
-                                            if (dx || dy) {
-                                                const sStyle = s.style;
-                                                sStyle.transition = "none";
-                                                sStyle.transform = `translate(${dx}px, ${dy}px)`;
-                                                s.getBoundingClientRect();
-                                                sStyle.transition = "transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)";
-                                                sStyle.transform = "translate(0,0)";
-                                            }
-                                        }
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    };
-
-                    const onMouseUp = () => {
-                        isDragging = false;
-                        document.removeEventListener("mousemove", onMouseMove);
-                        document.removeEventListener("mouseup", onMouseUp);
-
-                        // Capture final position from placeholder
-                        const finalRect = placeholder.getBoundingClientRect();
-                        targetX = finalRect.left;
-                        targetY = finalRect.top;
-                        isLanding = true;
-                    };
-
-                    document.addEventListener("mousemove", onMouseMove);
-                    document.addEventListener("mouseup", onMouseUp);
-                    requestAnimationFrame(moveLoop);
-                });
-
-                const footer = this.el("div", { className: "library-card-footer" }, [
-                    dragHandle,
-                    this.el("div", { textContent: "⋯" })
-                ]);
-
-                card.appendChild(header);
-                card.appendChild(listContainer);
-                card.appendChild(footer);
-
-                return card;
-            } catch (e) {
-                console.error("Error creating workspace card:", e);
-                return null;
-            }
-        }
-
-        closeWorkspaceUnpinnedTabs(workspaceId) {
-            console.log("[ZenLib v5.1] Starting cleanup for:", workspaceId);
-
-            const wsEl = window.gZenWorkspaces.workspaceElement(workspaceId);
-            const tabs = Array.from(wsEl?.tabsContainer?.children || []).filter(child =>
-                window.gBrowser.isTab(child) && !child.hasAttribute("zen-essential")
-            );
-
-            console.log(`[ZenLib v4.6] Found ${tabs.length} tabs in DOM for purge.`);
-
-            if (tabs.length === 0) {
-                console.warn("[ZenLib v4.6] No unpinned tabs found in the native container.");
-                return;
-            }
-
-            // Zen's "#getClosableTabs" logic: filter out tabs with side effects
-            let closableTabs = tabs.filter(tab => {
-                const attributes = ["selected", "multiselected", "pictureinpicture", "soundplaying"];
-                for (const attr of attributes) if (tab.hasAttribute(attr)) return false;
-                const browser = tab.linkedBrowser;
-                if (window.webrtcUI?.browserHasStreams(browser) ||
-                    browser?.browsingContext?.currentWindowGlobal?.hasActivePeerConnections()) return false;
-                return true;
-            });
-
-            if (closableTabs.length === 0) closableTabs = tabs;
-
-            console.log(`[ZenLib v4.3] Purging ${closableTabs.length} tabs...`);
-            window.gBrowser.removeTabs(closableTabs, {
-                closeWindowWithLastTab: false,
-            });
-
-            if (window.gZenUIManager?.showToast) {
-                const restoreKey = window.gZenKeyboardShortcutsManager?.getShortcutDisplayFromCommand(
-                    "History:RestoreLastClosedTabOrWindowOrSession"
-                ) || "Ctrl+Shift+T";
-
-                window.gZenUIManager.showToast("zen-workspaces-close-all-unpinned-tabs-toast", {
-                    l10nArgs: {
-                        shortcut: restoreKey,
-                    },
-                });
-            }
-
-            if (this.update) {
-                // Small delay to ensure browser removes tabs before refresh
-                setTimeout(() => {
-                    console.log("[ZenLib v4.3] Triggering immediate refresh...");
-                    this.update();
-                }, 200);
-            }
-        }
-
-        renderItemRecursive(item, container, wsId) {
-            if (window.gBrowser.isTabGroup(item)) {
-                if (item.hasAttribute("split-view-group")) {
-                    this.renderSplitView(item, container, wsId);
-                } else {
-                    this.renderFolder(item, container, wsId);
-                }
-            } else if (window.gBrowser.isTab(item)) {
-                this.renderTab(item, container, wsId);
-            }
-        }
-
-        renderSplitView(group, container, wsId) {
-            const splitEl = this.el("div", { className: "library-split-view-group" });
-            const tabs = (group.tabs || []).filter(child => {
-                return !child.hasAttribute('cloned') && !child.hasAttribute('zen-empty-tab');
-            });
-            tabs.forEach(tab => this.renderTab(tab, splitEl, wsId));
-            container.appendChild(splitEl);
-        }
-
-        renderFolder(folder, container, wsId) {
-            const folderId = folder.id || `${wsId}:${folder.label}`;
-
-            // Priority: Local state > Native expanded state
-            let isExpanded;
-            if (this._folderExpansion.has(folderId)) {
-                isExpanded = this._folderExpansion.get(folderId);
-            } else {
-                const isNativeCollapsed = folder.hasAttribute("zen-folder-collapsed") || folder.collapsed;
-                isExpanded = !isNativeCollapsed;
-                this._folderExpansion.set(folderId, isExpanded);
-            }
-
-            // Check for active tab inside collapsed folder (Nebula logic)
-            const allTabs = folder.allItemsRecursive || folder.tabs || [];
-            const hasActive = allTabs.some(t => t.selected);
-
-            const folderEl = this.el("div", { className: `library-workspace-folder ${isExpanded ? '' : 'collapsed'}` });
-
-            const headerEl = this.el("div", {
-                className: "library-workspace-item folder",
-                onclick: (e) => {
-                    e.stopPropagation();
-                    const currentlyExpanded = this._folderExpansion.get(folderId);
-                    const newlyExpanded = !currentlyExpanded;
-
-                    // Update Local State
-                    this._folderExpansion.set(folderId, newlyExpanded);
-
-                    // Update DOM Classes
-                    folderEl.classList.toggle("collapsed", !newlyExpanded);
-
-                    // If newly expanded, we might want to ensure the parent grid doesn't jump
-                    // but the CSS transition should handle the smooth shift.
-
-                    // Update SVG Attributes and Styles
-                    const chevron = headerEl.querySelector(".folder-chevron svg");
-                    if (chevron) {
-                        const rot = newlyExpanded ? "0deg" : "-90deg";
-                        chevron.setAttribute("style", `transform: rotate(${rot}); transition: transform 0.2s;`);
-                    }
-
-                    const iconSvg = headerEl.querySelector(".folder-icon svg");
-                    if (iconSvg) {
-                        iconSvg.setAttribute("state", newlyExpanded ? "open" : "close");
-                    }
-                }
-            });
-
-            const rot = isExpanded ? '0deg' : '-90deg';
-            const chevronSvg = this.svg(`<svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="transform: rotate(${rot}); transition: transform 0.2s;"><path d="M7 10l5 5 5-5z"/></svg>`);
-
-            const folderIconSvg = this.createFolderIconSVG(folder.iconURL, isExpanded ? "open" : "close", hasActive && !isExpanded);
-
-            headerEl.appendChild(this.el("span", { className: "folder-chevron" }, [chevronSvg]));
-
-            const iconWrapper = this.el("span", { className: "item-icon folder-icon" });
-            iconWrapper.appendChild(folderIconSvg);
-            headerEl.appendChild(iconWrapper);
-
-            headerEl.appendChild(this.el("span", { className: "item-label", textContent: folder.label || "Folder" }));
-
-            folderEl.appendChild(headerEl);
-
-            const contentEl = this.el("div", { className: "library-workspace-folder-content" });
-            const children = (folder.allItems || folder.tabs || []).filter(child => {
-                return !child.hasAttribute('cloned') && !child.hasAttribute('zen-empty-tab');
-            });
-            children.forEach(child => this.renderItemRecursive(child, contentEl, wsId));
-
-            folderEl.appendChild(contentEl);
-            container.appendChild(folderEl);
-        }
-
-        renderTab(tab, container, wsId) {
-            const iconSrc = tab.image || tab.icon || "chrome://global/skin/icons/defaultFavicon.svg";
-            const isPinned = tab.pinned;
-
-            const itemEl = this.el("div", {
-                className: `library-workspace-item ${tab.selected ? 'selected' : ''}`,
-                onclick: () => {
-                    if (window.gZenWorkspaces.activeWorkspace !== wsId) {
-                        window.gZenWorkspaces.changeWorkspaceWithID(wsId);
-                    }
-                    window.gBrowser.selectedTab = tab;
-                    window.gZenLibrary.close();
-                }
-            }, [
-                this.el("img", { src: iconSrc, className: "item-icon", onerror: "this.src='chrome://global/skin/icons/defaultFavicon.svg'" }),
-                this.el("span", { className: "item-label", textContent: tab.label })
-            ]);
-
-            // Add container identity line (content line)
-            const contextId = tab.getAttribute("usercontextid");
-            if (contextId && contextId !== "0") {
-                const computedStyle = window.getComputedStyle(tab);
-                const identityColor = computedStyle.getPropertyValue("--identity-tab-color");
-                const identityLine = this.el("div", {
-                    className: "library-tab-identity-line",
-                    style: `--identity-tab-color: ${identityColor || 'transparent'}`
-                });
-                itemEl.appendChild(identityLine);
-            }
-
-            // Add close/unpin button (same position for both)
-            const closeBtn = this.el("div", {
-                className: `library-tab-close-button ${isPinned ? 'unpin' : 'close'}`,
-                title: isPinned ? "Unpin Tab" : "Close Tab",
-                onclick: (e) => {
-                    e.stopPropagation();
-                    if (isPinned) {
-                        window.gBrowser.unpinTab(tab);
-                    } else {
-                        window.gBrowser.removeTab(tab);
-                    }
-                    if (this.update) setTimeout(() => this.update(), 150);
-                }
-            }, [this.el("div", { className: "icon-mask" })]);
-            itemEl.appendChild(closeBtn);
-
-            container.appendChild(itemEl);
-        }
     }
 
     if (!customElements.get("zen-library")) customElements.define("zen-library", ZenLibraryElement);
 
-    // Initial Controller Logic (retained from successful restoration)
     class ZenLibrary {
         constructor() {
             this._isOpen = false;
@@ -3634,6 +613,22 @@ zen-library, #zen-library-container {
             this._isTransitioning = false;
             this._lastToggleTime = 0;
             this._onKeyDown = this._onKeyDown.bind(this);
+
+            // Initialize Store
+            this.store = new ZenStore({
+                downloads: [],
+                history: [],
+                activeTab: 'downloads'
+            });
+
+            // Persistent module instances for background pre-fetching
+            this._modules = {
+                downloads: null,
+                history: null,
+                media: null,
+                spaces: null
+            };
+
             this._init();
         }
         update() {
@@ -3646,13 +641,141 @@ zen-library, #zen-library-container {
             if (!document.getElementById("zen-library-global-style")) {
                 const s = document.createElement("style"); s.id = "zen-library-global-style"; s.textContent = GLOBAL_CSS; document.head.appendChild(s);
             }
+
+            // Background initialization after browser is ready
+            // Use a short delay to ensure feature modules are loaded
+            setTimeout(() => this._initModules(), 2000);
+        }
+
+        /**
+         * Initialize persistent module instances and trigger background data fetching
+         */
+        _initModules() {
+            // Create a minimal "shell" object for modules that need library.el helper
+            const shell = this._createModuleShell();
+
+            try {
+                if (window.ZenLibraryDownloads && !this._modules.downloads) {
+                    this._modules.downloads = new window.ZenLibraryDownloads(shell);
+                    if (this._modules.downloads.init) this._modules.downloads.init();
+                }
+                if (window.ZenLibraryHistory && !this._modules.history) {
+                    this._modules.history = new window.ZenLibraryHistory(shell);
+                    if (this._modules.history.init) this._modules.history.init();
+                }
+                if (window.ZenLibraryMedia && !this._modules.media) {
+                    this._modules.media = new window.ZenLibraryMedia(shell);
+                    // Media doesn't need init for now as it's not as critical
+                }
+                if (window.ZenLibrarySpaces && !this._modules.spaces) {
+                    this._modules.spaces = new window.ZenLibrarySpaces(shell);
+                }
+            } catch (e) {
+                console.error("ZenLibrary: Module initialization error", e);
+            }
+        }
+
+        /**
+         * Create a minimal shell object that provides the el() helper for modules
+         */
+        _createModuleShell() {
+            return {
+                el(tag, props = {}, children = []) {
+                    const el = document.createElement(tag);
+                    const { className, id, textContent, innerHTML, onclick, src, oncontextmenu, style, dataset, ...other } = props;
+                    if (className) el.className = className;
+                    if (id) el.id = id;
+                    if (textContent !== undefined) el.textContent = textContent;
+                    if (innerHTML !== undefined) el.innerHTML = innerHTML;
+                    if (onclick) el.onclick = onclick;
+                    if (src) el.src = src;
+                    if (oncontextmenu) el.oncontextmenu = oncontextmenu;
+                    if (style) {
+                        if (typeof style === 'string') el.style.cssText = style;
+                        else Object.assign(el.style, style);
+                    }
+                    if (dataset) Object.assign(el.dataset, dataset);
+                    for (const key in other) {
+                        if (key.startsWith('on')) el[key] = other[key];
+                        else el.setAttribute(key, other[key]);
+                    }
+                    if (children) {
+                        if (Array.isArray(children)) {
+                            for (const child of children) {
+                                if (child) el.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+                            }
+                        } else if (children instanceof Node) {
+                            el.appendChild(children);
+                        } else {
+                            el.appendChild(document.createTextNode(String(children)));
+                        }
+                    }
+                    return el;
+                },
+                style: { getPropertyValue: () => "" },
+                store: this.store
+            };
+        }
+
+        /**
+         * Get pre-initialized module instances for the library element to use
+         */
+        getModules() {
+            return this._modules;
         }
         _onKeyDown(e) {
             if (e.altKey && e.shiftKey && e.code === "KeyB") {
                 e.preventDefault();
                 e.stopPropagation();
                 this.toggle();
+                return;
             }
+
+            if (!this._isOpen || !this._element) return;
+
+            // Allow closing with Escape
+            if (e.code === "Escape") {
+                this.close();
+                e.preventDefault();
+                return;
+            }
+
+            // Handle Navigation within Library
+            const shadow = this._element.shadowRoot;
+            if (!shadow) return;
+
+            if (e.code === "ArrowDown" || e.code === "ArrowUp") {
+                e.preventDefault();
+                this._moveFocus(e.code === "ArrowDown" ? 1 : -1);
+            }
+        }
+
+        /**
+         * Move focus to next/prev focusable element in the library
+         */
+        _moveFocus(dir) {
+            const shadow = this._element.shadowRoot;
+            const focusableSelector = '.library-list-item, .history-nav-item, .sidebar-button, input, button, [tabindex="0"]';
+            const all = Array.from(shadow.querySelectorAll(focusableSelector))
+                .filter(el => el.offsetParent !== null && !el.disabled && el.style.display !== "none");
+
+            if (all.length === 0) return;
+
+            const current = shadow.activeElement;
+            let index = all.indexOf(current);
+
+            if (index === -1) {
+                // If focus is not in list, focus first item
+                index = dir > 0 ? 0 : all.length - 1;
+            } else {
+                index += dir;
+                // Loop around
+                if (index < 0) index = all.length - 1;
+                if (index >= all.length) index = 0;
+            }
+
+            all[index].focus();
+            all[index].scrollIntoView({ block: "nearest" });
         }
         destroy() {
             window.removeEventListener("keydown", this._onKeyDown, true);
@@ -3693,14 +816,12 @@ zen-library, #zen-library-container {
             if (!isCompactHidden) {
                 const t = document.getElementById("navigator-toolbox");
                 const s = document.getElementById("zen-sidebar-splitter");
-                const b = document.getElementById("sidebar-box");
+                const sb = document.getElementById("sidebar-box");
 
-                // Measure all potential sidebar elements
                 startWidth = (t ? t.getBoundingClientRect().width : 0) +
                     (s ? s.getBoundingClientRect().width : 0) +
-                    (b ? b.getBoundingClientRect().width : 0);
+                    (sb ? sb.getBoundingClientRect().width : 0);
 
-                // If DOM is not ready or collapsed, use the system variable (source of truth)
                 if (startWidth === 0) {
                     const cssWidth = getComputedStyle(document.documentElement).getPropertyValue('--zen-sidebar-width').trim();
                     if (cssWidth && cssWidth.endsWith('px')) {
@@ -3709,7 +830,7 @@ zen-library, #zen-library-container {
                 }
             }
 
-            this._element.style.width = startWidth + "px"; // LOCK IT
+            this._element.style.width = startWidth + "px";
             this._element.style.setProperty("--zen-library-start-width", startWidth + "px");
 
             if (isRightSide) b.append(this._element);
@@ -3721,9 +842,8 @@ zen-library, #zen-library-container {
                 document.documentElement.setAttribute("zen-library-open-compact", "true");
             }
 
-            // Trigger the visual shift
             requestAnimationFrame(() => requestAnimationFrame(() => {
-                this._element.update(); // Recalculate offset and apply
+                if (this._element) this._element.update();
             }));
 
             setTimeout(() => { this._isTransitioning = false; }, 400);
@@ -3738,7 +858,6 @@ zen-library, #zen-library-container {
 
             const wasNormalOpen = document.documentElement.hasAttribute("zen-library-open");
 
-            // Reset translation to 0 to slide back
             document.documentElement.style.setProperty("--zen-library-offset", "0px");
 
             const end = () => {
@@ -3748,7 +867,7 @@ zen-library, #zen-library-container {
                 if (!this._isOpen) {
                     document.documentElement.removeAttribute("zen-library-open");
                     document.documentElement.removeAttribute("zen-library-open-compact");
-                    document.documentElement.style.removeProperty("--zen-library-offset"); // Cleanup
+                    document.documentElement.style.removeProperty("--zen-library-offset");
                     document.documentElement.removeAttribute("zen-media-glance-active");
 
                     if (wasNormalOpen) {
@@ -3761,7 +880,6 @@ zen-library, #zen-library-container {
                 }
             };
 
-            // Wait for transform transition (0.25s) + safety
             setTimeout(end, 300);
         }
     }
