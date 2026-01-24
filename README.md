@@ -1,9 +1,9 @@
 # Zen-Library
-A Sine mod which adds Library feature to Zen
+A Sine mod which adds Library feature to Zen Browser
 
-Press hotkey "Alt Shift B"
+Press hotkey "**Alt Shift B**"
 
-<img width="1919" height="1079" alt="Screenshot 2026-01-20 161732" src="https://github.com/user-attachments/assets/eec25d32-626a-4f38-85d5-03957c3a4203" />
-<img width="1919" height="1079" alt="Screenshot 2026-01-20 161748" src="https://github.com/user-attachments/assets/d112318e-f566-43bf-99c2-beabd3b5a999" />
-<img width="1919" height="1079" alt="Screenshot 2026-01-20 161803" src="https://github.com/user-attachments/assets/07a7a879-4bad-426e-847d-7a0fcf0fc350" />
-<img width="1919" height="1079" alt="Screenshot 2026-01-20 161755" src="https://github.com/user-attachments/assets/26a4d69b-470d-4a21-a4c5-a81e6825a700" />
+<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/f99ca9a6-8c96-4053-b9cb-3f7313becb13" />
+<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/efbfd9ad-34de-4a24-934f-33131348f25c" />
+<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/b8585f4f-3fd0-44fd-94ff-f2d53c8ad441" />
+<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/779b5577-13fb-46be-bb0c-e8c4273366e7" />
