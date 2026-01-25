@@ -404,6 +404,161 @@
                 const card = this.el("div", {
                     className: `media-card ${isAudio && this._playingId === item.id ? 'playing' : ''}`,
                     dataset: { id: item.id },
+                    draggable: true,
+                    ondragstart: (e) => {
+                        try {
+                            // Check file exists
+                            if (!item.file || !item.file.exists()) {
+                                return;
+                            }
+
+                            const dataTransfer = e.dataTransfer;
+                            dataTransfer.effectAllowed = "copyMove";
+
+                            // Create a styled drag ghost image (matching library card style)
+                            const ghost = document.createElement("div");
+                            ghost.style.cssText = `
+                                position: fixed;
+                                top: -1000px;
+                                left: -1000px;
+                                width: 160px;
+                                background: #1e1e23;
+                                border-radius: 12px;
+                                overflow: hidden;
+                                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+                                z-index: 999999;
+                            `;
+
+                            // Add preview container
+                            const previewWrap = document.createElement("div");
+                            previewWrap.style.cssText = `
+                                width: 100%;
+                                height: 120px;
+                                overflow: hidden;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                background: rgba(255, 255, 255, 0.03);
+                            `;
+
+                            // Add thumbnail or icon
+                            if (!isAudio) {
+                                const thumb = document.createElement("img");
+                                thumb.src = fileUrl;
+                                thumb.style.cssText = `
+                                    width: 100%;
+                                    height: 100%;
+                                    object-fit: cover;
+                                `;
+                                previewWrap.appendChild(thumb);
+                            } else {
+                                const icon = document.createElement("div");
+                                icon.style.cssText = `
+                                    width: 60px;
+                                    height: 60px;
+                                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    border-radius: 12px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                `;
+                                icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+                                previewWrap.appendChild(icon);
+                            }
+                            ghost.appendChild(previewWrap);
+
+                            // Add info section (like library card)
+                            const info = document.createElement("div");
+                            info.style.cssText = `
+                                padding: 10px 12px;
+                                display: flex;
+                                flex-direction: column;
+                                gap: 4px;
+                            `;
+
+                            // Filename
+                            const title = document.createElement("div");
+                            title.textContent = item.filename.length > 20
+                                ? item.filename.slice(0, 17) + "..."
+                                : item.filename;
+                            title.style.cssText = `
+                                font-size: 12px;
+                                color: rgba(255, 255, 255, 0.9);
+                                white-space: nowrap;
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                                font-weight: 600;
+                            `;
+                            info.appendChild(title);
+
+                            // File size
+                            const meta = document.createElement("div");
+                            const sizeStr = this.formatBytes(item.size);
+                            meta.textContent = sizeStr;
+                            meta.style.cssText = `
+                                font-size: 10px;
+                                color: rgba(255, 255, 255, 0.5);
+                            `;
+                            info.appendChild(meta);
+
+                            ghost.appendChild(info);
+
+                            // Append to document, set as drag image, then remove after delay
+                            document.documentElement.appendChild(ghost);
+                            dataTransfer.setDragImage(ghost, 80, 70);
+                            setTimeout(() => ghost.remove(), 0);
+
+                            // Read file content and create HTML5 File object for web pages
+                            const stream = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(Ci.nsIFileInputStream);
+                            stream.init(item.file, 0x01, 0o444, 0);
+                            const bis = Cc["@mozilla.org/binaryinputstream;1"].createInstance(Ci.nsIBinaryInputStream);
+                            bis.setInputStream(stream);
+
+                            const bytes = bis.readByteArray(item.file.fileSize);
+                            stream.close();
+
+                            // Create a File object from the bytes
+                            const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
+                            const file = new File([blob], item.filename, { type: contentType });
+
+                            // Use the items API to add the File
+                            dataTransfer.items.add(file);
+
+                            // Also set text fallbacks
+                            const spec = Services.io.newFileURI(item.file).spec;
+                            dataTransfer.setData("text/uri-list", spec);
+                            dataTransfer.setData("text/plain", item.filename);
+
+                            e.stopPropagation();
+                        } catch (err) {
+                            console.error("Drag error:", err);
+                        }
+
+                        // Add visual feedback class
+                        card.classList.add("dragging");
+                    },
+                    ondragend: (e) => {
+                        card.classList.remove("dragging");
+                    },
+                    oncontextmenu: (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        // Show file in folder (for Discord and apps that need OS-level drag)
+                        if (item.file && item.file.exists()) {
+                            try {
+                                item.file.reveal();
+                            } catch (err) {
+                                // Fallback: open parent folder
+                                try {
+                                    const parent = item.file.parent;
+                                    if (parent && parent.exists()) {
+                                        parent.launch();
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+                    },
                     onclick: (e) => {
                         if (isAudio) {
                             this.toggleAudio(item, card);
@@ -411,7 +566,7 @@
                             this.showGlance(item, e);
                         }
                     },
-                    title: item.filename
+                    title: `${item.filename}\n(Right-click to show in folder)`
                 });
 
                 const previewContainer = this.el("div", {

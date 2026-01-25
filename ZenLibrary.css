@@ -955,6 +955,20 @@
     display: block;
 }
 
+/* Drag and Drop Visual Feedback */
+.media-card.dragging {
+    opacity: 0.6;
+    transform: scale(0.98);
+    cursor: grabbing;
+}
+
+.media-card {
+    cursor: grab;
+}
+
+.media-card:active {
+    cursor: grabbing;
+}
 
 /* SPACES GRID & CARD */
 .library-workspace-grid {
