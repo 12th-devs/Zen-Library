@@ -736,7 +736,17 @@ zen-library, #zen-library-container {
             return this._modules;
         }
         _onKeyDown(e) {
-            if (e.altKey && e.shiftKey && e.code === "KeyB") {
+            const isMac = Services.appinfo.OS === "Darwin";
+            const toggleKey = e.code === "KeyB";
+
+            // Support Alt + Shift + B (Direct fallback/Windows default)
+            // AND Cmd + Alt + B (Common macOS alternative)
+            const isToggle = toggleKey && (
+                (e.altKey && e.shiftKey) ||
+                (isMac && e.metaKey && e.altKey)
+            );
+
+            if (isToggle) {
                 e.preventDefault();
                 e.stopPropagation();
                 this.toggle();
