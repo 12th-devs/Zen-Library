@@ -1,0 +1,599 @@
+/* === 1. GRID CONTAINER & SCROLLBARS === */
+
+.library-workspace-grid {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    gap: 16px;
+    padding: 0 16px;
+    align-items: center;
+    height: 100%;
+    overflow: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+.library-workspace-grid.scrollbar-visible {
+    overflow-x: auto;
+}
+
+.library-workspace-grid::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+
+.library-workspace-grid::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor, transparent 50%);
+    border-radius: 10px;
+}
+
+.library-workspace-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+/* === 2. CREATE WORKSPACE BUTTON === */
+
+.library-create-workspace-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    background: light-dark(color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+            color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%));
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.2s ease, transform 0.15s cubic-bezier(0.07, 0.95, 0, 1);
+    opacity: 0.7;
+    color: var(--toolbarbutton-icon-fill, rgba(255, 255, 255, 0.85));
+    margin-left: -2px;
+}
+
+.library-create-workspace-button:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.library-create-workspace-button:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease-out;
+    opacity: 0.9;
+}
+
+.library-create-workspace-button span {
+    font-size: 22px;
+    font-weight: 300;
+    line-height: 0;
+    color: inherit;
+    user-select: none;
+    transition: transform 0.2s ease;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: -1.5px;
+}
+
+.library-create-workspace-button:active span {
+    transform: scale(0.95);
+}
+
+
+/* === 3. WORKSPACE CARD BASE === */
+
+.library-workspace-card {
+    width: 240px;
+    min-width: 240px;
+    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    max-height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    flex-shrink: 0;
+    border-radius: var(--border-radius-medium);
+    padding: 8px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    background: var(--ws-gradient, var(--zen-primary-color));
+    color: var(--ws-text-color, inherit);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    contain: strict;
+    transition: opacity 0.3s var(--zen-library-easing), transform 0.3s var(--zen-library-easing);
+}
+
+.library-workspace-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("chrome://browser/content/zen-images/grain-bg.png");
+    opacity: var(--ws-grain, 0);
+    pointer-events: none;
+    mix-blend-mode: overlay;
+}
+
+
+/* === 4. CARD HEADER & ACTIONS === */
+
+.library-workspace-card-header {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--toolbarbutton-inner-padding) - 1px);
+    position: relative;
+    z-index: 2;
+    padding: 0 8px;
+    opacity: 0.8;
+    flex-shrink: 0;
+}
+
+.library-workspace-icon-container {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+.library-workspace-icon-text {
+    font-size: 16px;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-icon-empty {
+    width: 100%;
+    height: 100%;
+    border: 1px dashed var(--ws-text-color);
+    border-radius: 4px;
+    opacity: 0.8;
+}
+
+.library-workspace-name {
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-edit-button {
+    margin-left: auto;
+    cursor: pointer;
+    opacity: 0.8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 4px;
+    margin-right: -5px;
+    transition: opacity 0.2s ease;
+    border-radius: 4px;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-edit-button:hover {
+    opacity: 1;
+    background: transparent;
+}
+
+.library-workspace-edit-button div {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 122.88 103.78' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0,103.78c11.7-8.38,30.46.62,37.83-14a16.66,16.66,0,0,0,.62-13.37,10.9,10.9,0,0,0-3.17-4.35,11.88,11.88,0,0,0-2.11-1.35c-9.63-4.78-19.67,1.91-25,10-4.9,7.43-7,16.71-8.18,23.07ZM54.09,43.42a54.31,54.31,0,0,1,15,18.06l50.19-49.16c3.17-3,5-5.53,2.3-10.13A6.5,6.5,0,0,0,117.41,0,7.09,7.09,0,0,0,112.8,1.6L54.09,43.42Zm-16.85,22c2.82,1.52,6.69,5.25,7.61,9.32L65.83,64c-3.78-7.54-8.61-14-15.23-18.58-6.9,9.27-5.5,11.17-13.36,20Z' fill='black' fill-rule='evenodd'/%3E%3C/svg%3E") no-repeat center / contain;
+    pointer-events: none;
+}
+
+
+/* === 5. CARD CONTENT (LIST & ITEMS) === */
+
+.library-workspace-card-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+    min-height: 0;
+}
+
+.library-workspace-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: var(--tab-inline-padding);
+    min-height: var(--tab-min-height);
+    margin-block: 4px 2px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.library-workspace-item:hover {
+    background: var(--zen-library-hover-bg, var(--ws-tab-hover-color));
+}
+
+.library-workspace-item.selected {
+    background: var(--ws-tab-selected-color);
+    box-shadow: var(--ws-tab-selected-shadow);
+}
+
+.library-workspace-item .item-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.library-workspace-item .item-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+    direction: ltr;
+    mask-image: linear-gradient(to left, transparent, black var(--tab-label-mask-size));
+}
+
+.library-workspace-item:hover .item-label {
+    mask-image: linear-gradient(to left, transparent 32px, black 44px);
+}
+
+.library-tab-close-button {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius-small, 4px);
+    opacity: 0;
+    pointer-events: none;
+    cursor: pointer;
+    background: transparent;
+    color: var(--ws-text-color, inherit);
+}
+
+.library-tab-close-button .icon-mask {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -moz-context-properties: fill, stroke;
+}
+
+.library-tab-close-button.unpin .icon-mask {
+    mask-image: url("chrome://browser/skin/zen-icons/unpin.svg");
+}
+
+.library-tab-close-button.close .icon-mask {
+    mask-image: url("chrome://browser/skin/zen-icons/close.svg") !important;
+}
+
+.library-workspace-item:hover .library-tab-close-button {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.library-tab-close-button:hover {
+    opacity: 1 !important;
+    background: var(--ws-tab-hover-color);
+}
+
+.library-tab-identity-line {
+    position: absolute;
+    right: 0;
+    inset-block: 0;
+    width: 3px;
+    background-color: var(--identity-tab-color, transparent);
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+
+/* === 6. FOLDERS & SPECIALIZED ICONS === */
+
+.library-workspace-item.folder .item-label {
+    font-weight: 600 !important;
+}
+
+.library-workspace-folder {
+    flex-shrink: 0;
+    width: 100%;
+}
+
+.library-workspace-folder.collapsed>.library-workspace-folder-content {
+    max-height: 0;
+    opacity: 0.5;
+    transform: translateY(-10px);
+    pointer-events: none;
+}
+
+.library-workspace-folder-content {
+    margin-inline-start: 16px;
+    transition: max-height 0.15s var(--zen-library-easing),
+        opacity 0.15s ease,
+        transform 0.15s var(--zen-library-easing);
+    max-height: 4000px;
+    overflow: hidden;
+}
+
+.folder-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.folder-icon svg {
+    overflow: visible !important;
+    margin-left: -18px;
+}
+
+.folder-icon svg image {
+    fill: var(--ws-folder-stroke);
+    -moz-context-properties: fill, fill-opacity;
+}
+
+.folder-icon svg g,
+.folder-icon svg rect,
+.folder-icon svg path {
+    transition: transform 0.3s cubic-bezier(0.42, 0, 0, 1), opacity 0.3s cubic-bezier(0.42, 0, 0, 1);
+}
+
+.folder-icon svg[state='open'] .back {
+    transform: skewX(16deg) translate(-2px, 3.4px) scale(0.85);
+}
+
+.folder-icon svg[state='open'] :is(.front, .dots, .icon) {
+    transform: skewX(-16deg) translate(11.1px, 3.4px) scale(0.85);
+}
+
+.empty-icon.spaces-icon {
+    mask-image: url("chrome://browser/skin/window.svg");
+}
+
+
+/* === 7. SPLIT VIEW GROUPS === */
+
+.library-split-view-group {
+    display: flex;
+    flex-direction: row;
+    border-radius: 6px;
+    transition: background-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    padding: 0 2px;
+    min-height: var(--tab-min-height);
+}
+
+.library-split-view-group:hover {
+    background: var(--ws-tab-hover-color);
+}
+
+.library-split-view-group:has(.selected) {
+    background: var(--ws-tab-selected-color);
+    box-shadow: var(--ws-tab-selected-shadow);
+}
+
+.library-split-view-group .library-workspace-item {
+    flex: 1;
+    min-width: 0;
+    margin: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding-inline: 6px;
+    justify-content: center;
+}
+
+.library-split-view-group .library-workspace-item:not(:last-child)::after {
+    content: '';
+    width: 1px;
+    height: 16px;
+    background-color: var(--ws-text-color);
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.3;
+}
+
+.library-split-view-group .library-workspace-item:hover .item-label {
+    mask-image: linear-gradient(to left, transparent 28px, black 40px);
+}
+
+
+/* === 8. SEPARATORS & CLEANUP BUTTON === */
+
+.library-workspace-separator-container {
+    display: flex;
+    align-items: center;
+    margin: 4px 2px;
+    position: relative;
+    z-index: 10;
+}
+
+.library-workspace-separator {
+    flex: 1;
+    height: 1px;
+    background: var(--ws-text-color);
+    opacity: 0.15;
+    transition: all 0.2s ease;
+}
+
+.library-workspace-cleanup-button {
+    height: 12px;
+    width: 0;
+    padding: 0;
+    opacity: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--ws-text-color);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 500;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.library-workspace-card:hover .library-workspace-cleanup-button {
+    width: 42px;
+    padding: 0 4px;
+    margin-left: 2px;
+    opacity: 0.6;
+    pointer-events: auto;
+}
+
+.library-workspace-cleanup-button:hover {
+    opacity: 1 !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.library-workspace-cleanup-button::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    background-color: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg fill='none' stroke='currentColor' stroke-width='1.5' height='12' width='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 2.75,7.75 6,11 9.25,7.75 M 6,1 v 9.75'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+
+/* === 9. CARD FOOTER & DRAG HANDLE === */
+
+.library-card-footer {
+    padding: 0 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    opacity: 0.8;
+    margin-top: auto;
+    font-size: 0;
+    flex-shrink: 0;
+    color: var(--ws-text-color);
+}
+
+.library-workspace-drag-handle {
+    cursor: grab;
+    padding: 8px 0;
+    margin: 0 0 -4px 0;
+    border-radius: 4px;
+    transition: opacity 0.2s;
+    user-select: none;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 1;
+}
+
+.library-workspace-drag-handle:hover {
+    background: transparent;
+    opacity: 1;
+}
+
+.library-workspace-drag-handle:active {
+    cursor: grabbing;
+}
+
+
+/* === 10. DRAG & DROP STATES === */
+
+.library-workspace-grid[dragging-workspace="true"] .library-workspace-card:not([dragged="true"]) {
+    opacity: 0.6;
+    filter: none;
+    pointer-events: none;
+}
+
+.library-workspace-card[dragged="true"] {
+    position: fixed !important;
+    z-index: 10000 !important;
+    pointer-events: none;
+    transform-origin: center center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    opacity: 1 !important;
+    margin: 0 !important;
+    transition: none !important;
+    background-color: var(--ws-primary-color) !important;
+    isolation: isolate;
+}
+
+.library-workspace-card[dragged="true"]::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: var(--ws-gradient) !important;
+    opacity: 1 !important;
+    z-index: -2 !important;
+    border-radius: inherit;
+}
+
+.library-workspace-card[dragged="true"]::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background-image: url("chrome://browser/content/zen-images/grain-bg.png") !important;
+    opacity: var(--ws-grain, 0.45) !important;
+    pointer-events: none !important;
+    mix-blend-mode: overlay !important;
+    z-index: -1 !important;
+    border-radius: inherit;
+}
+
+.library-workspace-card-placeholder.entering {
+    animation: placeholderPopIn 0.3s var(--zen-library-easing) forwards;
+}
+
+.library-workspace-card-placeholder {
+    width: 240px;
+    min-width: 240px;
+    height: calc(100% - (var(--zen-element-separation, 4px) * 10));
+    background: light-dark(color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+            color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%));
+    border: 2px dashed var(--zen-folder-stroke);
+    border-radius: var(--border-radius-medium);
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+
+/* === 11. ANIMATIONS === */
+
+@keyframes placeholderPopIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+
+    100% {
+        opacity: 0.5;
+        transform: scale(1);
+    }
+}

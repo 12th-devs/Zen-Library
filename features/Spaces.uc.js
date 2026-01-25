@@ -329,11 +329,10 @@
                     document.body.appendChild(overlay);
 
                     const preDragRect = card.getBoundingClientRect();
-                    card.style.setProperty('--dragged-bg-color', ws.primaryColor);
                     card.setAttribute("dragged", "true");
                     grid.setAttribute("dragging-workspace", "true");
 
-                    const placeholder = this.el("div", { className: "library-workspace-card-placeholder" });
+                    const placeholder = this.el("div", { className: "library-workspace-card-placeholder entering" });
                     grid.insertBefore(placeholder, card);
 
                     card.style.width = preDragRect.width + "px";
@@ -435,70 +434,54 @@
                         targetX = mouseX - initialOffsetX;
                         targetY = mouseY - initialOffsetY;
 
-                        const children = Array.from(grid.children).filter(c => !c.classList.contains('library-create-workspace-button'));
-                        for (let i = 0; i < children.length; i++) {
-                            const sib = children[i];
-                            if (sib === card || sib === placeholder) continue;
-                            const r = sib.getBoundingClientRect();
-                            if (mouseX > r.left && mouseX < r.right) {
-                                const halfway = r.left + r.width / 2;
-                                let shouldSwap = false;
-                                let swapTarget = null;
-                                let insertBefore = false;
+                        const gridRect = grid.getBoundingClientRect();
+                        const scrollLeft = grid.scrollLeft;
+                        const paddingLeft = 16;
+                        const cardWidthPlusGap = 240 + 16;
 
-                                if (mouseX < halfway) {
-                                    if (placeholder.nextSibling !== sib) {
-                                        shouldSwap = true;
-                                        swapTarget = sib;
-                                        insertBefore = true;
+                        const localX = mouseX - gridRect.left + scrollLeft - paddingLeft;
+                        let targetIdx = Math.floor(localX / cardWidthPlusGap);
+
+                        const currentChildren = Array.from(grid.children).filter(c => c.classList.contains('library-workspace-card') && !c.hasAttribute('dragged') || c === placeholder);
+                        targetIdx = Math.max(0, Math.min(targetIdx, currentChildren.length - 1));
+
+                        const currentIdx = currentChildren.indexOf(placeholder);
+
+                        if (targetIdx !== currentIdx) {
+                            const siblings = currentChildren.filter(c => c !== placeholder);
+                            const firstPositions = new Map();
+                            siblings.forEach(s => firstPositions.set(s, s.getBoundingClientRect()));
+
+                            // Find target element among static flow
+                            const swapTarget = currentChildren[targetIdx < currentIdx ? targetIdx : targetIdx + 1] || grid.querySelector('.library-create-workspace-button');
+
+                            grid.insertBefore(placeholder, swapTarget);
+
+                            // Re-check index in the NEW child list
+                            const newChildren = Array.from(grid.children).filter(c => c.classList.contains('library-workspace-card') && !c.hasAttribute('dragged') || c === placeholder);
+                            const finalIdx = newChildren.indexOf(placeholder);
+
+                            if (finalIdx !== currentIdx) {
+                                // Trigger animation
+                                placeholder.classList.remove("entering");
+                                void placeholder.offsetWidth;
+                                placeholder.classList.add("entering");
+
+                                // Shift siblings smoothly (FLIP)
+                                siblings.forEach(s => {
+                                    const first = firstPositions.get(s);
+                                    const last = s.getBoundingClientRect();
+                                    const dx = first.left - last.left;
+                                    if (dx !== 0) {
+                                        s.style.transition = 'none';
+                                        s.style.transform = `translateX(${dx}px)`;
+                                        void s.offsetWidth;
+                                        requestAnimationFrame(() => {
+                                            s.style.transition = 'transform 0.3s var(--zen-library-easing)';
+                                            s.style.transform = '';
+                                        });
                                     }
-                                } else {
-                                    if (sib.nextSibling !== placeholder) {
-                                        shouldSwap = true;
-                                        swapTarget = sib.nextSibling;
-                                        insertBefore = true;
-                                        // Wait, insertBefore sib.nextSibling effectively is insertAfter sib
-                                    }
-                                }
-
-                                if (shouldSwap) {
-                                    // 1. First: Capture current positions
-                                    const siblings = Array.from(grid.children).filter(c => c !== card && c !== placeholder && c.classList.contains('library-workspace-card'));
-                                    const firstForSiblings = new Map();
-                                    siblings.forEach(s => {
-                                        firstForSiblings.set(s, s.getBoundingClientRect());
-                                    });
-
-                                    // 2. Play (Move DOM)
-                                    if (insertBefore) {
-                                        grid.insertBefore(placeholder, swapTarget);
-                                    } else {
-                                        // Logic above covers all cases with swapTarget
-                                    }
-
-                                    // 3. Last & Invert: Calculate delta and apply transform
-                                    siblings.forEach(s => {
-                                        const first = firstForSiblings.get(s);
-                                        const last = s.getBoundingClientRect();
-                                        const deltaX = first.left - last.left;
-                                        const deltaY = first.top - last.top;
-
-                                        if (deltaX !== 0 || deltaY !== 0) {
-                                            s.style.transition = 'none';
-                                            s.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-
-                                            // Force layout
-                                            void s.offsetWidth;
-
-                                            // 4. Play: Remove transform to animate to new position
-                                            requestAnimationFrame(() => {
-                                                s.style.transition = 'transform 0.3s var(--zen-library-easing)';
-                                                s.style.transform = '';
-                                            });
-                                        }
-                                    });
-                                }
-                                break;
+                                });
                             }
                         }
                     };

@@ -1,0 +1,153 @@
+/* HISTORY SECTION */
+.history-pane {
+    width: 50%;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+}
+
+.view-switcher-container {
+    display: flex;
+    align-items: center;
+    padding: 4px 16px;
+    margin-bottom: 4px;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    user-select: none;
+}
+
+.view-switcher-container:hover {
+    opacity: 1;
+}
+
+.view-switcher-arrow {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-down.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    transition: transform 0.3s var(--zen-library-easing);
+}
+
+.panes-shifted .view-switcher-arrow {
+    transform: rotate(-90deg);
+}
+
+.panes-shifted .library-list-panes {
+    transform: translateX(-50%);
+}
+
+.history-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    height: 40px;
+    cursor: pointer;
+    transition: all 0.2s var(--zen-library-easing);
+    border-radius: var(--border-radius-medium);
+    margin: 0 8px;
+    color: var(--ws-text-color);
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.history-nav-item:hover {
+    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.08));
+}
+
+.history-nav-item .nav-icon {
+    width: 16px;
+    height: 16px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    opacity: 0.8;
+}
+
+.history-nav-item .nav-label {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.history-nav-item .nav-arrow {
+    width: 16px;
+    height: 16px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-right.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    opacity: 0.5;
+}
+
+.history-back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    margin-bottom: 0px;
+}
+
+.history-back-button:hover {
+    opacity: 1;
+}
+
+.history-back-button .back-arrow {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-image: url("chrome://global/skin/icons/arrow-left.svg");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+.history-separator {
+    height: 1px;
+    background: currentColor;
+    opacity: 0.1;
+    margin: 4px 16px;
+}
+
+.history-bottom-spacer {
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.history-section-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.5;
+    margin: 8px 8px 8px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.history-section-header::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.2;
+}
+
+.empty-icon.history-icon {
+    mask-image: url("chrome://browser/skin/history.svg");
+}
