@@ -132,7 +132,12 @@
     }
 
     if (!customElements.get('zen-library-item')) {
-        customElements.define('zen-library-item', ZenLibraryItem);
+        try {
+            customElements.define('zen-library-item', ZenLibraryItem);
+            console.log("ZenLibrary: zen-library-item custom element registered successfully");
+        } catch (e) {
+            console.error("ZenLibrary: Failed to register zen-library-item custom element:", e);
+        }
     }
     window.ZenLibraryItem = ZenLibraryItem;
 
@@ -230,8 +235,10 @@
         }
 
         connectedCallback() {
+            console.log("[ZenLibrary] ZenLibraryElement connectedCallback called");
             try {
                 if (!this._initialized) {
+                    console.log("[ZenLibrary] Initializing ZenLibraryElement");
                     const link = document.createElement("link");
                     link.rel = "stylesheet";
                     link.href = _ucScriptPath.replace(/\.uc\.js(\?.*)?$/i, ".css");
@@ -365,11 +372,14 @@
                     this.shadowRoot.appendChild(container);
 
                     this._initialized = true;
+                    console.log("[ZenLibrary] ZenLibraryElement initialization complete");
                 }
                 this.setAttribute("active-tab", this.activeTab);
+                console.log("[ZenLibrary] About to call update(), activeTab:", this.activeTab);
                 this.update();
                 this.getBoundingClientRect();
                 requestAnimationFrame(() => requestAnimationFrame(() => this.style.width = ""));
+                console.log("[ZenLibrary] ZenLibraryElement connectedCallback finished");
             } catch (e) {
                 console.error("ZenLibrary Error in connectedCallback:", e);
             }
@@ -377,6 +387,12 @@
 
         update() {
             try {
+                // Check if custom elements are properly registered
+                if (!customElements.get('zen-library-item')) {
+                    console.error("ZenLibrary Error: zen-library-item custom element not registered");
+                    return;
+                }
+                
                 // Common width calculation
                 // We can rely on Spaces module or default fallback
                 let targetWidth = 340;
@@ -568,7 +584,14 @@
         }
     }
 
-    if (!customElements.get("zen-library")) customElements.define("zen-library", ZenLibraryElement);
+    if (!customElements.get("zen-library")) {
+        try {
+            customElements.define("zen-library", ZenLibraryElement);
+            console.log("ZenLibrary: zen-library custom element registered successfully");
+        } catch (e) {
+            console.error("ZenLibrary: Failed to register zen-library custom element:", e);
+        }
+    }
 
     class ZenLibrary {
         constructor() {
@@ -649,37 +672,37 @@
             
             try {
                 CustomizableUI.createWidget({
-                    id: "zen-library-button",                // required
-                    type: "toolbarbutton",                   // "toolbaritem" or "toolbarbutton"
-                    label: "Zen Library",                    // optional (uses id when missing)
-                    tooltip: "Zen Library",                  // optional (uses id when missing)
-                    class: "zen-library-button",             // optional additional className
-                    callback: (ev, win) => {                 // Function called when clicked
-                        if (win.gZenLibrary) {
-                            win.gZenLibrary.toggle();
+                    id: "zen-library-button",
+                    type: "toolbarbutton",
+                    label: "Zen Library",
+                    tooltiptext: "Zen Library",
+                    onCreated: (node) => {
+                        if (node) {
+                            node.addEventListener("click", (ev) => {
+                                console.log("[ZenLibrary] Button clicked");
+                                if (window.gZenLibrary) {
+                                    window.gZenLibrary.toggle();
+                                }
+                            });
                         }
                     }
                 });
                 
-                // Add event listener as fallback in case callback doesn't work
+                console.log("ZenLibrary: Toggle button created successfully");
+            } catch (e) {
+                console.error("[ZenLibrary] Failed to create widget:", e);
+                // Fallback: try to find and add click handler to existing button
                 setTimeout(() => {
                     const button = document.getElementById("zen-library-button");
                     if (button) {
-                        button.addEventListener("click", (ev) => {
-                            console.log("[ZenLibrary] Button clicked via event listener");
+                        button.addEventListener("click", () => {
                             if (window.gZenLibrary) {
                                 window.gZenLibrary.toggle();
                             }
                         });
-                        console.log("[ZenLibrary] Event listener added to button");
-                    } else {
-                        console.warn("[ZenLibrary] Button element not found for event listener");
+                        console.log("[ZenLibrary] Added fallback click handler");
                     }
                 }, 1000);
-                
-                console.log("[ZenLibrary] Toggle button created successfully");
-            } catch (e) {
-                console.error("[ZenLibrary] Failed to create widget:", e);
             }
         }
 
@@ -801,18 +824,37 @@
             if (el) el.remove();
         }
         toggle() {
+            console.log("[ZenLibrary] Toggle called, _isOpen:", this._isOpen, "_isTransitioning:", this._isTransitioning);
             const now = Date.now();
-            if (now - this._lastToggleTime < 100) return;
+            if (now - this._lastToggleTime < 100) {
+                console.log("[ZenLibrary] Toggle blocked - too soon since last toggle");
+                return;
+            }
             this._lastToggleTime = now;
-            if (this._isTransitioning) return;
-            if (this._isOpen && !document.querySelector("zen-library")) this._isOpen = false;
+            if (this._isTransitioning) {
+                console.log("[ZenLibrary] Toggle blocked - currently transitioning");
+                return;
+            }
+            if (this._isOpen && !document.querySelector("zen-library")) {
+                console.log("[ZenLibrary] Resetting _isOpen state - element not found");
+                this._isOpen = false;
+            }
+            console.log("[ZenLibrary] Calling", this._isOpen ? "close()" : "open()");
             this._isOpen ? this.close() : this.open();
         }
         open() {
-            if (this._isOpen || this._isTransitioning) return;
+            console.log("[ZenLibrary] Open called, _isOpen:", this._isOpen, "_isTransitioning:", this._isTransitioning);
+            if (this._isOpen || this._isTransitioning) {
+                console.log("[ZenLibrary] Open blocked - already open or transitioning");
+                return;
+            }
             const b = document.getElementById("browser");
-            if (!b) return;
+            if (!b) {
+                console.log("[ZenLibrary] Open blocked - browser element not found");
+                return;
+            }
 
+            console.log("[ZenLibrary] Opening library...");
             this._isTransitioning = true;
             this._isOpen = true;
 
@@ -826,6 +868,8 @@
             } catch (e) { }
 
             this._element = document.createElement("zen-library");
+            console.log("[ZenLibrary] Created element:", this._element);
+            console.log("[ZenLibrary] Element constructor:", this._element.constructor.name);
             this._element.id = "zen-library-container";
             if (isRightSide) this._element.setAttribute("right-side", "true");
             this._element.style.zIndex = "1";
@@ -850,9 +894,15 @@
 
             this._element.style.width = startWidth + "px";
             this._element.style.setProperty("--zen-library-start-width", startWidth + "px");
+            this._element.style.display = "block";
+            this._element.style.visibility = "visible";
+            this._element.style.opacity = "1";
 
             if (isRightSide) b.append(this._element);
             else b.prepend(this._element);
+            
+            console.log("[ZenLibrary] Element appended to browser, parent:", this._element.parentNode);
+            console.log("[ZenLibrary] Element in DOM:", document.contains(this._element));
 
             if (!isCompactHidden) {
                 document.documentElement.setAttribute("zen-library-open", "true");
@@ -861,10 +911,18 @@
             }
 
             requestAnimationFrame(() => requestAnimationFrame(() => {
-                if (this._element) this._element.update();
+                if (this._element) {
+                    console.log("[ZenLibrary] Calling element.update()");
+                    this._element.update();
+                } else {
+                    console.log("[ZenLibrary] Element not found for update");
+                }
             }));
 
-            setTimeout(() => { this._isTransitioning = false; }, 400);
+            setTimeout(() => { 
+                console.log("[ZenLibrary] Resetting _isTransitioning to false");
+                this._isTransitioning = false; 
+            }, 400);
         }
 
         close() {

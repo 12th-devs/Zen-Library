@@ -287,90 +287,109 @@
         }
 
         renderBatch(reset = true) {
-            if (!this._container) return;
+            try {
+                if (!this._container) return;
 
-            if (reset) {
-                const navItems = this._container.querySelectorAll(".history-nav-static");
-                this._container.innerHTML = "";
-                navItems.forEach(i => this._container.appendChild(i));
-                this._renderedCount = 0;
-                this._lastGroupLabel = null;
+                // Check if custom elements are properly registered
+                if (!customElements.get('zen-library-item')) {
+                    console.error("ZenLibrary Error in renderBatch: zen-library-item custom element not registered");
+                    return;
+                }
+
+                if (reset) {
+                    const navItems = this._container.querySelectorAll(".history-nav-static");
+                    this._container.innerHTML = "";
+                    navItems.forEach(i => this._container.appendChild(i));
+                    this._renderedCount = 0;
+                    this._lastGroupLabel = null;
+                }
+
+                const filtered = this._searchTerm
+                    ? this._items.filter(i =>
+                        i.title.toLowerCase().includes(this._searchTerm.toLowerCase()) ||
+                        i.uri.toLowerCase().includes(this._searchTerm.toLowerCase())
+                    )
+                    : this._items;
+
+                if (filtered.length === 0 && !this._isLoading) {
+                    if (!reset) return;
+                    const empty = this.el("div", { className: "empty-state" }, [
+                        this.el("div", { className: "empty-icon history-icon" }),
+                        this.el("h3", { textContent: this._searchTerm ? "No results found" : "No history found" }),
+                        this.el("p", { textContent: "Your browsing history is empty." })
+                    ]);
+                    this._container.appendChild(empty);
+                    return;
+                }
+
+                const nextBatch = filtered.slice(this._renderedCount, this._renderedCount + this._batchSize);
+                if (nextBatch.length === 0) return;
+
+                const fragment = document.createDocumentFragment();
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+
+                nextBatch.forEach(item => {
+                    try {
+                        const timeMs = item.time / 1000;
+                        let groupLabel = "";
+
+                        if (this._searchTerm) {
+                            groupLabel = "Search Results";
+                        } else {
+                            const d = new Date(timeMs); d.setHours(0, 0, 0, 0);
+                            if (d.getTime() === today.getTime()) groupLabel = "Today";
+                            else if (d.getTime() === yesterday.getTime()) groupLabel = "Yesterday";
+                            else groupLabel = new Date(timeMs).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+                        }
+
+                        if (groupLabel !== this._lastGroupLabel) {
+                            fragment.appendChild(this.el("div", { className: "history-section-header", textContent: groupLabel }));
+                            this._lastGroupLabel = groupLabel;
+                        }
+
+                        const displayTime = (this._searchTerm || (this._lastGroupLabel !== "Today" && this._lastGroupLabel !== "Yesterday"))
+                            ? item.dateStr : item.timeStr;
+
+                        const itemEl = document.createElement('zen-library-item');
+                        if (!itemEl || typeof itemEl.setAttribute !== 'function') {
+                            console.error("ZenLibrary Error: zen-library-item custom element not properly registered");
+                            return;
+                        }
+                        
+                        // Set data first so status/logic can apply
+                        itemEl.data = item;
+
+                        itemEl.setAttribute("icon", `page-icon:${item.uri}`);
+                        itemEl.setAttribute("title", item.title);
+                        itemEl.setAttribute("subtitle", item.uri);
+                        itemEl.setAttribute("time", displayTime);
+
+                        if (this._highlightNewerThan && item.time > this._highlightNewerThan) {
+                            itemEl.classList.add("pop-in");
+                        }
+
+                        itemEl.onclick = () => {
+                            window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
+                                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+                            });
+                            window.gZenLibrary.close();
+                        };
+
+                        fragment.appendChild(itemEl);
+                    } catch (itemError) {
+                        console.error("ZenLibrary Error processing history item:", itemError, item);
+                    }
+                });
+
+                this._renderedCount += nextBatch.length;
+                const oldSpacer = this._container.querySelector(".history-bottom-spacer");
+                if (oldSpacer) oldSpacer.remove();
+                this._container.appendChild(fragment);
+                this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+            } catch (e) {
+                console.error("ZenLibrary Error in renderBatch:", e);
             }
-
-            const filtered = this._searchTerm
-                ? this._items.filter(i =>
-                    i.title.toLowerCase().includes(this._searchTerm.toLowerCase()) ||
-                    i.uri.toLowerCase().includes(this._searchTerm.toLowerCase())
-                )
-                : this._items;
-
-            if (filtered.length === 0 && !this._isLoading) {
-                if (!reset) return;
-                const empty = this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon history-icon" }),
-                    this.el("h3", { textContent: this._searchTerm ? "No results found" : "No history found" }),
-                    this.el("p", { textContent: "Your browsing history is empty." })
-                ]);
-                this._container.appendChild(empty);
-                return;
-            }
-
-            const nextBatch = filtered.slice(this._renderedCount, this._renderedCount + this._batchSize);
-            if (nextBatch.length === 0) return;
-
-            const fragment = document.createDocumentFragment();
-            const today = new Date(); today.setHours(0, 0, 0, 0);
-            const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-
-            nextBatch.forEach(item => {
-                const timeMs = item.time / 1000;
-                let groupLabel = "";
-
-                if (this._searchTerm) {
-                    groupLabel = "Search Results";
-                } else {
-                    const d = new Date(timeMs); d.setHours(0, 0, 0, 0);
-                    if (d.getTime() === today.getTime()) groupLabel = "Today";
-                    else if (d.getTime() === yesterday.getTime()) groupLabel = "Yesterday";
-                    else groupLabel = new Date(timeMs).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-                }
-
-                if (groupLabel !== this._lastGroupLabel) {
-                    fragment.appendChild(this.el("div", { className: "history-section-header", textContent: groupLabel }));
-                    this._lastGroupLabel = groupLabel;
-                }
-
-                const displayTime = (this._searchTerm || (this._lastGroupLabel !== "Today" && this._lastGroupLabel !== "Yesterday"))
-                    ? item.dateStr : item.timeStr;
-
-                const itemEl = new window.ZenLibraryItem();
-                // Set data first so status/logic can apply
-                itemEl.data = item;
-
-                itemEl.setAttribute("icon", `page-icon:${item.uri}`);
-                itemEl.setAttribute("title", item.title);
-                itemEl.setAttribute("subtitle", item.uri);
-                itemEl.setAttribute("time", displayTime);
-
-                if (this._highlightNewerThan && item.time > this._highlightNewerThan) {
-                    itemEl.classList.add("pop-in");
-                }
-
-                itemEl.onclick = () => {
-                    window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
-                        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                    });
-                    window.gZenLibrary.close();
-                };
-
-                fragment.appendChild(itemEl);
-            });
-
-            this._renderedCount += nextBatch.length;
-            const oldSpacer = this._container.querySelector(".history-bottom-spacer");
-            if (oldSpacer) oldSpacer.remove();
-            this._container.appendChild(fragment);
-            this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
         }
 
         loadMore() { if (!this._isLoading) this.renderBatch(false); }
