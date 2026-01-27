@@ -180,81 +180,101 @@
         }
 
         renderList(downloads) {
-            if (!this._container) return;
-            this._container.innerHTML = "";
-            this._container.classList.add("scrollbar-visible");
+            try {
+                if (!this._container) return;
+                
+                // Check if custom elements are properly registered
+                if (!customElements.get('zen-library-item')) {
+                    console.error("ZenLibrary Error in renderList: zen-library-item custom element not registered");
+                    return;
+                }
+                
+                this._container.innerHTML = "";
+                this._container.classList.add("scrollbar-visible");
 
-            if (downloads.length === 0) {
-                const emptyState = this.el("div", { className: "empty-state" }, [
-                    this.el("div", { className: "empty-icon downloads-icon" }),
-                    this.el("h3", { textContent: "No downloads found" }),
-                    this.el("p", { textContent: this._searchTerm ? "Try a different search term." : "Your download history is empty." })
-                ]);
-                this._container.appendChild(emptyState);
-                return;
-            }
+                if (downloads.length === 0) {
+                    const emptyState = this.el("div", { className: "empty-state" }, [
+                        this.el("div", { className: "empty-icon downloads-icon" }),
+                        this.el("h3", { textContent: "No downloads found" }),
+                        this.el("p", { textContent: this._searchTerm ? "Try a different search term." : "Your download history is empty." })
+                    ]);
+                    this._container.appendChild(emptyState);
+                    return;
+                }
 
-            // Group by date
-            const groups = {};
-            const now = new Date();
-            downloads.forEach(d => {
-                const date = new Date(d.timestamp);
-                const diffTime = now - date;
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                let key = "Earlier";
-                if (diffDays === 0 && now.getDate() === date.getDate()) key = "Today";
-                else if (diffDays === 1) key = "Yesterday";
-                else if (diffDays < 7) key = date.toLocaleDateString(undefined, { weekday: "long" });
-                else if (diffDays < 30) key = "Last Month";
+                // Group by date
+                const groups = {};
+                const now = new Date();
+                downloads.forEach(d => {
+                    const date = new Date(d.timestamp);
+                    const diffTime = now - date;
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                    let key = "Earlier";
+                    if (diffDays === 0 && now.getDate() === date.getDate()) key = "Today";
+                    else if (diffDays === 1) key = "Yesterday";
+                    else if (diffDays < 7) key = date.toLocaleDateString(undefined, { weekday: "long" });
+                    else if (diffDays < 30) key = "Last Month";
 
-                if (!groups[key]) groups[key] = [];
-                groups[key].push(d);
-            });
-
-            const order = ["Today", "Yesterday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Last Month", "Earlier"];
-
-            order.forEach(key => {
-                if (!groups[key]) return;
-
-                this._container.appendChild(this.el("div", { className: "history-section-header", textContent: key }));
-
-                groups[key].sort((a, b) => b.timestamp - a.timestamp).forEach(item => {
-                    const timeStr = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                    const itemEl = new window.ZenLibraryItem();
-                    itemEl.data = item; // Sets item data and status classes
-                    itemEl.setAttribute("icon", `moz-icon://${item.targetPath}?size=32`);
-                    itemEl.setAttribute("title", item.filename);
-                    itemEl.setAttribute("subtitle", `${this.formatBytes(item.size)} • ${item.status}`);
-                    itemEl.setAttribute("time", timeStr);
-
-                    itemEl.onclick = (e) => {
-                        // Ignore clicks on the folder icon, handled separately
-                        if (e.target.closest('.item-folder-icon')) return;
-                        this.handleAction(item, "open");
-                    };
-                    itemEl.oncontextmenu = (e) => {
-                        e.preventDefault();
-                        this.handleContextMenu(e, item);
-                    };
-
-                    const folderIcon = this.el("div", {
-                        className: `item-folder-icon${item.status === "deleted" ? " disabled" : ""}`,
-                        title: item.status === "deleted" ? "File deleted" : "Show in Folder",
-                        onclick: (e) => {
-                            e.stopPropagation();
-                            if (item.status === "deleted") return;
-                            this.handleAction(item, "show");
-                        },
-                        innerHTML: `<div class="item-folder-mask"></div>`
-                    });
-
-                    itemEl.appendSecondaryAction(folderIcon);
-                    this._container.appendChild(itemEl);
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(d);
                 });
-            });
 
-            this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+                const order = ["Today", "Yesterday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Last Month", "Earlier"];
+
+                order.forEach(key => {
+                    if (!groups[key]) return;
+
+                    this._container.appendChild(this.el("div", { className: "history-section-header", textContent: key }));
+
+                    groups[key].sort((a, b) => b.timestamp - a.timestamp).forEach(item => {
+                        try {
+                            const timeStr = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                            const itemEl = document.createElement('zen-library-item');
+                            if (!itemEl || typeof itemEl.setAttribute !== 'function') {
+                                console.error("ZenLibrary Error: zen-library-item custom element not properly registered");
+                                return;
+                            }
+                            
+                            itemEl.data = item; // Sets item data and status classes
+                            itemEl.setAttribute("icon", `moz-icon://${item.targetPath}?size=32`);
+                            itemEl.setAttribute("title", item.filename);
+                            itemEl.setAttribute("subtitle", `${this.formatBytes(item.size)} • ${item.status}`);
+                            itemEl.setAttribute("time", timeStr);
+
+                            itemEl.onclick = (e) => {
+                                // Ignore clicks on the folder icon, handled separately
+                                if (e.target.closest('.item-folder-icon')) return;
+                                this.handleAction(item, "open");
+                            };
+                            itemEl.oncontextmenu = (e) => {
+                                e.preventDefault();
+                                this.handleContextMenu(e, item);
+                            };
+
+                            const folderIcon = this.el("div", {
+                                className: `item-folder-icon${item.status === "deleted" ? " disabled" : ""}`,
+                                title: item.status === "deleted" ? "File deleted" : "Show in Folder",
+                                onclick: (e) => {
+                                    e.stopPropagation();
+                                    if (item.status === "deleted") return;
+                                    this.handleAction(item, "show");
+                                },
+                                innerHTML: `<div class="item-folder-mask"></div>`
+                            });
+
+                            itemEl.appendSecondaryAction(folderIcon);
+                            this._container.appendChild(itemEl);
+                        } catch (itemError) {
+                            console.error("ZenLibrary Error processing download item:", itemError, item);
+                        }
+                    });
+                });
+
+                this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+            } catch (e) {
+                console.error("ZenLibrary Error in renderList:", e);
+            }
         }
 
         handleAction(item, action) {
