@@ -545,57 +545,26 @@
 
                         const menu = this.el("div", {
                             className: "media-context-menu",
-                            style: {
-                                position: "fixed",
-                                left: `${e.clientX}px`,
-                                top: `${e.clientY}px`,
-                                background: "#1e1e23",
-                                border: "1px solid rgba(255, 255, 255, 0.1)",
-                                borderRadius: "10px",
-                                padding: "5px",
-                                boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
-                                zIndex: "1000000",
-                                minWidth: "150px",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "2px"
-                            }
+                            style: `left: ${e.clientX}px; top: ${e.clientY}px;`
                         });
 
                         const createItem = (label, iconSvg, onClick) => {
                             const iconWrapper = this.el("div", {
-                                style: {
-                                    width: "16px",
-                                    height: "16px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    opacity: "0.7"
-                                },
+                                className: "menu-icon",
                                 innerHTML: iconSvg
                             });
 
                             const menuItem = this.el("div", {
-                                className: "context-menu-item",
-                                style: {
-                                    padding: "10px 12px",
-                                    fontSize: "12.5px",
-                                    color: "rgba(255,255,255,0.9)",
-                                    cursor: "pointer",
-                                    borderRadius: "6px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "10px",
-                                    transition: "background 0.2s"
-                                },
-                                onmousedown: (ev) => {
+                                className: "media-menu-item",
+                                onclick: (ev) => {
                                     ev.preventDefault();
                                     ev.stopPropagation();
                                     onClick();
-                                    menu.remove();
-                                },
-                                onmouseover: (ev) => { ev.currentTarget.style.background = "rgba(255,255,255,0.1)"; },
-                                onmouseout: (ev) => { ev.currentTarget.style.background = "transparent"; }
+                                    // Animation handle
+                                    menu.style.animation = "menuSpringOut 0.12s cubic-bezier(0.4, 0, 0.2, 1) forwards";
+                                    setTimeout(() => menu.remove(), 120);
+                                    document.removeEventListener("mousedown", closeMenu);
+                                }
                             }, [
                                 iconWrapper,
                                 this.el("span", { textContent: label, style: "flex: 1;" })
@@ -618,11 +587,12 @@
                         // Close menu on click elsewhere
                         const closeMenu = (ev) => {
                             if (!menu.contains(ev.target)) {
-                                menu.remove();
-                                document.removeEventListener("mouseup", closeMenu);
+                                menu.style.animation = "menuSpringOut 0.12s cubic-bezier(0.4, 0, 0.2, 1) forwards";
+                                setTimeout(() => menu.remove(), 120);
+                                document.removeEventListener("mousedown", closeMenu);
                             }
                         };
-                        document.addEventListener("mouseup", closeMenu);
+                        document.addEventListener("mousedown", closeMenu);
                     },
                     onclick: (e) => {
                         if (isAudio) {
