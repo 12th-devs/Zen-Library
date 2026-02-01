@@ -1,0 +1,13 @@
+/* DOWNLOADS SECTION */
+.library-list-item.deleted .item-title {
+    text-decoration: line-through;
+    opacity: 0.5;
+}
+
+.library-list-item.deleted .item-icon-container {
+    opacity: 0.4;
+}
+
+.empty-icon.downloads-icon {
+    mask-image: url("chrome://browser/skin/downloads/downloads.svg");
+}
