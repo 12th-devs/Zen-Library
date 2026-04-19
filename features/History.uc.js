@@ -376,6 +376,11 @@
                             window.gZenLibrary.close();
                         };
 
+                        itemEl.oncontextmenu = (e) => {
+                            e.preventDefault();
+                            this._showContextMenu(e, item, itemEl);
+                        };
+
                         fragment.appendChild(itemEl);
                     } catch (itemError) {
                         console.error("ZenLibrary Error processing history item:", itemError, item);
@@ -393,6 +398,43 @@
         }
 
         loadMore() { if (!this._isLoading) this.renderBatch(false); }
+
+        _ensureContextMenu() {
+            if (document.getElementById("zen-history-context-menu")) return;
+            const popup = document.createXULElement("menupopup");
+            popup.id = "zen-history-context-menu";
+
+            const deleteItem = document.createXULElement("menuitem");
+            deleteItem.id = "zen-history-ctx-delete";
+            deleteItem.setAttribute("label", "Delete");
+
+            popup.appendChild(deleteItem);
+            (document.getElementById("mainPopupSet") || document.body).appendChild(popup);
+        }
+
+        _showContextMenu(e, item, itemEl) {
+            this._ensureContextMenu();
+            const popup = document.getElementById("zen-history-context-menu");
+            const deleteItem = document.getElementById("zen-history-ctx-delete");
+            const newDelete = deleteItem.cloneNode(true);
+            deleteItem.replaceWith(newDelete);
+
+            newDelete.addEventListener("command", async () => {
+                try {
+                    const { PlacesUtils } = ChromeUtils.importESModule("resource://gre/modules/PlacesUtils.sys.mjs");
+                    await PlacesUtils.history.remove(item.uri);
+                    this._items = this._items.filter(i => i.uri !== item.uri);
+                    itemEl.style.transition = "opacity 0.15s, transform 0.15s";
+                    itemEl.style.opacity = "0";
+                    itemEl.style.transform = "translateX(-8px)";
+                    setTimeout(() => this.renderBatch(true), 160);
+                } catch (err) {
+                    console.error("[ZenLibrary History] Delete failed:", err);
+                }
+            });
+
+            popup.openPopupAtScreen(e.screenX, e.screenY, true);
+        }
 
         renderClosedTabs() {
             if (!this._closedWindowsContainer) return;

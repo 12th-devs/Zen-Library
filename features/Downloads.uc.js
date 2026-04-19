@@ -202,19 +202,32 @@
                     return;
                 }
 
-                // Group by date
+                // Group by date — compare calendar dates, not elapsed hours
                 const groups = {};
                 const now = new Date();
+                const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterdayMidnight = new Date(todayMidnight);
+                yesterdayMidnight.setDate(yesterdayMidnight.getDate() - 1);
+                const weekAgoMidnight = new Date(todayMidnight);
+                weekAgoMidnight.setDate(weekAgoMidnight.getDate() - 7);
+                const monthAgoMidnight = new Date(todayMidnight);
+                monthAgoMidnight.setDate(monthAgoMidnight.getDate() - 30);
+
                 downloads.forEach(d => {
                     const date = new Date(d.timestamp);
-                    const diffTime = now - date;
-                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                    let key = "Earlier";
-                    if (diffDays === 0 && now.getDate() === date.getDate()) key = "Today";
-                    else if (diffDays === 1) key = "Yesterday";
-                    else if (diffDays < 7) key = date.toLocaleDateString(undefined, { weekday: "long" });
-                    else if (diffDays < 30) key = "Last Month";
-
+                    const dateMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                    let key;
+                    if (dateMidnight.getTime() === todayMidnight.getTime()) {
+                        key = "Today";
+                    } else if (dateMidnight.getTime() === yesterdayMidnight.getTime()) {
+                        key = "Yesterday";
+                    } else if (dateMidnight >= weekAgoMidnight) {
+                        key = date.toLocaleDateString(undefined, { weekday: "long" });
+                    } else if (dateMidnight >= monthAgoMidnight) {
+                        key = "Last Month";
+                    } else {
+                        key = "Earlier";
+                    }
                     if (!groups[key]) groups[key] = [];
                     groups[key].push(d);
                 });
@@ -249,7 +262,7 @@
                             };
                             itemEl.oncontextmenu = (e) => {
                                 e.preventDefault();
-                                this.handleContextMenu(e, item);
+                                this._showContextMenu(e, item, itemEl);
                             };
 
                             // Add drag-and-drop support for dragging to web pages
@@ -343,6 +356,80 @@
 
         handleContextMenu(event, item) {
             // Placeholder
+        }
+
+        _ensureContextMenu() {
+            if (document.getElementById("zen-downloads-context-menu")) return;
+            const popup = document.createXULElement("menupopup");
+            popup.id = "zen-downloads-context-menu";
+
+            const renameItem = document.createXULElement("menuitem");
+            renameItem.id = "zen-downloads-ctx-rename";
+            renameItem.setAttribute("label", "Rename file");
+
+            const deleteItem = document.createXULElement("menuitem");
+            deleteItem.id = "zen-downloads-ctx-delete";
+            deleteItem.setAttribute("label", "Delete from history");
+
+            popup.appendChild(renameItem);
+            popup.appendChild(document.createXULElement("menuseparator"));
+            popup.appendChild(deleteItem);
+            (document.getElementById("mainPopupSet") || document.body).appendChild(popup);
+        }
+
+        _showContextMenu(e, item, itemEl) {
+            this._ensureContextMenu();
+            const popup = document.getElementById("zen-downloads-context-menu");
+
+            for (const id of ["zen-downloads-ctx-rename", "zen-downloads-ctx-delete"]) {
+                const el = document.getElementById(id);
+                if (el) el.replaceWith(el.cloneNode(true));
+            }
+
+            document.getElementById("zen-downloads-ctx-rename").addEventListener("command", () => {
+                if (!item.targetPath || item.status === "deleted") return;
+                const input = { value: item.filename };
+                const ok = Services.prompt.prompt(window, "Rename File", null, input, null, { value: false });
+                if (!ok || !input.value.trim() || input.value.trim() === item.filename) return;
+                try {
+                    const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+                    file.initWithPath(item.targetPath);
+                    if (!file.exists()) return;
+                    const newName = input.value.trim();
+                    file.moveTo(file.parent, newName);
+                    item.filename = newName;
+                    item.targetPath = file.parent.path + (file.parent.path.endsWith("\\") ? "" : "\\") + newName;
+                    itemEl.setAttribute("title", newName);
+                    if (this._cachedDownloads) {
+                        const cached = this._cachedDownloads.find(d => d.id === item.id);
+                        if (cached) cached.filename = newName;
+                    }
+                } catch (err) {
+                    console.error("[ZenLibrary Downloads] Rename failed:", err);
+                }
+            });
+
+            document.getElementById("zen-downloads-ctx-delete").addEventListener("command", async () => {
+                try {
+                    const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
+                    const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
+                    const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
+                    const isPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
+                    const list = await DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
+                    await list.remove(item.raw);
+                    itemEl.style.transition = "opacity 0.15s, transform 0.15s";
+                    itemEl.style.opacity = "0";
+                    itemEl.style.transform = "translateX(-8px)";
+                    setTimeout(() => {
+                        this._cachedDownloads = this._cachedDownloads?.filter(d => d.id !== item.id) ?? null;
+                        if (this._cachedDownloads) this.renderList(this._cachedDownloads);
+                    }, 160);
+                } catch (err) {
+                    console.error("[ZenLibrary Downloads] Delete failed:", err);
+                }
+            });
+
+            popup.openPopupAtScreen(e.screenX, e.screenY, true);
         }
 
         formatBytes(bytes, decimals = 2) {
