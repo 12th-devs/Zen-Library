@@ -600,6 +600,10 @@
             this._isTransitioning = false;
             this._lastToggleTime = 0;
             this._onKeyDown = this._onKeyDown.bind(this);
+            this._onWheel = this._onWheel.bind(this);
+            this._onMozSwipeGesture = this._onMozSwipeGesture.bind(this);
+            this._wheelGesture = { totalX: 0, lastTime: 0, mode: null };
+            this._mozSwipeGesture = { active: false, mode: null };
 
             // Initialize Store
             this.store = new ZenStore({
@@ -625,6 +629,14 @@
         }
         _init() {
             window.addEventListener("keydown", this._onKeyDown, true);
+            window.addEventListener("wheel", this._onWheel, { capture: true, passive: false });
+            [
+                "MozSwipeGestureMayStart",
+                "MozSwipeGestureStart",
+                "MozSwipeGestureUpdate",
+                "MozSwipeGesture",
+                "MozSwipeGestureEnd"
+            ].forEach((type) => window.addEventListener(type, this._onMozSwipeGesture, true));
             if (!document.getElementById("zen-library-global-style")) {
                 const s = document.createElement("style"); s.id = "zen-library-global-style"; document.head.appendChild(s);
             }
@@ -759,10 +771,12 @@
             const toggleKey = e.code === "KeyB";
 
             // Support Alt + Shift + B (Direct fallback/Windows default)
-            // AND Cmd + Alt + B (Common macOS alternative)
+            // Cmd + Alt + B (Common macOS alternative)
+            // AND Cmd + Shift + B (Arc-like macOS shortcut)
             const isToggle = toggleKey && (
                 (e.altKey && e.shiftKey) ||
-                (isMac && e.metaKey && e.altKey)
+                (isMac && e.metaKey && e.altKey) ||
+                (isMac && e.metaKey && e.shiftKey)
             );
 
             if (isToggle) {
@@ -809,6 +823,203 @@
             }
         }
 
+        _onWheel(e) {
+            if (this._isTransitioning) return;
+            const absX = Math.abs(e.deltaX);
+            const absY = Math.abs(e.deltaY);
+            const triggerThreshold = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 : 12;
+            if (absX < triggerThreshold || absX < absY * 1.35) return;
+
+            const now = Date.now();
+            const isNewGesture = now - this._wheelGesture.lastTime > 450;
+            const workspaceOffset = this._workspaceGestureOffsetFromDelta(e.deltaX);
+            if (isNewGesture) {
+                this._wheelGesture = {
+                    totalX: 0,
+                    lastTime: now,
+                    mode: this._wheelGestureMode(e, workspaceOffset)
+                };
+            } else {
+                this._wheelGesture.lastTime = now;
+            }
+
+            const shouldCloseFromLibrary = this._wheelGesture.mode === "close" && workspaceOffset > 0;
+            const shouldOpenFromFirstSpace = this._wheelGesture.mode === "open" && workspaceOffset < 0;
+            if (!shouldCloseFromLibrary && !shouldOpenFromFirstSpace) {
+                this._wheelGesture.totalX = 0;
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+
+            this._wheelGesture = { totalX: 0, lastTime: 0, mode: null };
+            shouldCloseFromLibrary ? this.close() : this.open();
+        }
+
+        _wheelGestureMode(e, workspaceOffset) {
+            if (this._isOpen && workspaceOffset > 0 && this._isLibraryGestureTarget(e)) {
+                return "close";
+            }
+            if (!this._isOpen && workspaceOffset < 0 && this._isOnFirstWorkspace() && this._isSidebarGestureTarget(e)) {
+                return "open";
+            }
+            return null;
+        }
+
+        _onMozSwipeGesture(e) {
+            if (this._isTransitioning) return;
+
+            if (e.type === "MozSwipeGestureEnd") {
+                this._mozSwipeGesture = { active: false, mode: null };
+                return;
+            }
+
+            const workspaceOffset = this._workspaceGestureOffsetFromSwipe(e);
+            const shouldCloseFromLibrary = this._isOpen &&
+                workspaceOffset > 0 &&
+                this._isLibraryGestureTarget(e);
+            const shouldOpenFromFirstSpace = !this._isOpen &&
+                workspaceOffset < 0 &&
+                this._isOnFirstWorkspace() &&
+                this._isSidebarGestureTarget(e);
+
+            if (e.type === "MozSwipeGestureMayStart") {
+                if (!shouldCloseFromLibrary && !shouldOpenFromFirstSpace) return;
+                this._mozSwipeGesture = {
+                    active: true,
+                    mode: shouldCloseFromLibrary ? "close" : "open"
+                };
+                if (typeof e.allowedDirections === "number") {
+                    e.allowedDirections |= e.DIRECTION_LEFT | e.DIRECTION_RIGHT;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation?.();
+                return;
+            }
+
+            if (!this._mozSwipeGesture.active) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+
+            if (e.type === "MozSwipeGesture") {
+                const mode = this._mozSwipeGesture.mode;
+                this._mozSwipeGesture = { active: false, mode: null };
+                mode === "close" ? this.close() : this.open();
+            }
+        }
+
+        _workspaceGestureOffsetFromDelta(deltaX) {
+            const rawDirection = deltaX > 0 ? 1 : -1;
+            const direction = window.gZenWorkspaces?.naturalScroll ? -1 : 1;
+            return rawDirection * direction;
+        }
+
+        _workspaceGestureOffsetFromSwipe(e) {
+            if (!e || typeof e.direction !== "number") return 0;
+            const isRTL = document.documentElement.matches(":-moz-locale-dir(rtl)");
+            const moveForward = (e.direction === e.DIRECTION_RIGHT) !== isRTL;
+            const rawDirection = moveForward ? 1 : -1;
+            const direction = window.gZenWorkspaces?.naturalScroll ? -1 : 1;
+            return rawDirection * direction;
+        }
+
+        _isOnFirstWorkspace() {
+            try {
+                const zenWorkspaces = window.gZenWorkspaces;
+                if (!zenWorkspaces) return true;
+
+                const activeId = this._workspaceId(
+                    zenWorkspaces.activeWorkspace ||
+                    zenWorkspaces.getActiveWorkspace?.() ||
+                    zenWorkspaces.activeWorkspaceElement
+                );
+
+                const visualFirstId = this._firstVisibleWorkspaceId();
+                if (visualFirstId && activeId) return activeId === visualFirstId;
+
+                const workspaces = zenWorkspaces.getWorkspaces?.() || [];
+                if (!workspaces.length) return true;
+
+                const firstId = this._workspaceId(workspaces[0]);
+                return !!firstId && activeId === firstId;
+            } catch (e) {
+                console.warn("[ZenLibrary] Failed to detect first workspace:", e);
+                return true;
+            }
+        }
+
+        _workspaceId(workspace) {
+            if (!workspace) return "";
+            if (typeof workspace === "string") return workspace;
+            if (workspace.nodeType === Node.ELEMENT_NODE) {
+                return workspace.getAttribute("zen-workspace-id") ||
+                    workspace.getAttribute("workspace-id") ||
+                    workspace.getAttribute("data-workspace-id") ||
+                    workspace.getAttribute("data-id") ||
+                    workspace.id ||
+                    "";
+            }
+            return workspace.uuid || workspace.id || workspace.name || workspace.label || "";
+        }
+
+        _firstVisibleWorkspaceId() {
+            const container = document.getElementById("zen-workspaces-button");
+            if (!container) return "";
+
+            const candidates = Array.from(container.querySelectorAll(
+                "[zen-workspace-id], [workspace-id], [data-workspace-id], [data-id], [value]"
+            )).filter((el) => {
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
+
+            const first = candidates[0];
+            if (!first) return "";
+
+            return first.getAttribute("zen-workspace-id") ||
+                first.getAttribute("workspace-id") ||
+                first.getAttribute("data-workspace-id") ||
+                first.getAttribute("data-id") ||
+                first.getAttribute("value") ||
+                first.id ||
+                "";
+        }
+
+        _isLibraryGestureTarget(e) {
+            const path = e.composedPath?.() || [];
+            if (path.some((el) => el?.tagName?.toLowerCase?.() === "zen-library" || el?.id === "zen-library-container")) {
+                return true;
+            }
+
+            const library = document.querySelector("zen-library");
+            return !!library && (e.target === library || library.contains?.(e.target));
+        }
+
+        _isSidebarGestureTarget(e) {
+            const target = e.target;
+            if (target?.closest?.("#navigator-toolbox, #sidebar-box, #zen-sidebar-splitter, [id*='zen-sidebar'], [class*='zen-sidebar'], [class*='workspace'], [id*='workspace']")) {
+                return true;
+            }
+
+            const toolbox = document.getElementById("navigator-toolbox");
+            const sidebar = document.getElementById("sidebar-box");
+            const splitter = document.getElementById("zen-sidebar-splitter");
+            const edgeWidth = Math.max(
+                toolbox?.getBoundingClientRect?.().width || 0,
+                sidebar?.getBoundingClientRect?.().right || 0,
+                splitter?.getBoundingClientRect?.().right || 0,
+                parseInt(getComputedStyle(document.documentElement).getPropertyValue("--zen-sidebar-width")) || 0,
+                300
+            );
+
+            return e.clientX <= edgeWidth + 16;
+        }
+
         /**
          * Move focus to next/prev focusable element in the library
          */
@@ -838,13 +1049,21 @@
         }
         destroy() {
             window.removeEventListener("keydown", this._onKeyDown, true);
+            window.removeEventListener("wheel", this._onWheel, true);
+            [
+                "MozSwipeGestureMayStart",
+                "MozSwipeGestureStart",
+                "MozSwipeGestureUpdate",
+                "MozSwipeGesture",
+                "MozSwipeGestureEnd"
+            ].forEach((type) => window.removeEventListener(type, this._onMozSwipeGesture, true));
             const el = document.querySelector("zen-library");
             if (el) el.remove();
         }
         toggle() {
             console.log("[ZenLibrary] Toggle called, _isOpen:", this._isOpen, "_isTransitioning:", this._isTransitioning);
             const now = Date.now();
-            if (now - this._lastToggleTime < 100) {
+            if (now - this._lastToggleTime < 40) {
                 console.log("[ZenLibrary] Toggle blocked - too soon since last toggle");
                 return;
             }
@@ -975,7 +1194,7 @@
             setTimeout(() => { 
                 console.log("[ZenLibrary] Resetting _isTransitioning to false");
                 this._isTransitioning = false; 
-            }, 400);
+            }, 60);
         }
 
         close() {
@@ -1006,13 +1225,13 @@
                         document.documentElement.classList.add("zen-toolbox-fading-in");
                         setTimeout(() => {
                             if (!this._isOpen) document.documentElement.classList.remove("zen-toolbox-fading-in");
-                        }, 400);
+                        }, 120);
                     }
                     this._isTransitioning = false;
                 }
             };
 
-            setTimeout(end, 300);
+            setTimeout(end, 120);
         }
     }
 
