@@ -1,0 +1,131 @@
+/* Zen Library — Easels section.
+ *
+ * A card grid rather than the list every other section uses: an easel is a picture, and
+ * a thumbnail identifies one far faster than its title does.
+ */
+
+.easel-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 4px 2px 12px 2px;
+  position: relative;
+}
+
+.easel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-medium, 8px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s var(--zen-library-easing, ease),
+              border-color 0.12s var(--zen-library-easing, ease);
+}
+
+.easel-card:hover {
+  background: var(--zen-library-hover-bg, var(--tab-hover-background-color, rgba(128, 128, 128, 0.14)));
+  border-color: var(--zen-border-color, transparent);
+}
+
+.easel-card:focus-visible {
+  outline: 2px solid var(--zen-primary-color);
+  outline-offset: 1px;
+}
+
+.easel-card-thumb {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  border: 1px solid var(--zen-border-color, rgba(128, 128, 128, 0.25));
+  background-color: var(--zen-toolbar-element-bg, rgba(128, 128, 128, 0.10));
+  background-size: cover;
+  background-position: top center;
+  background-repeat: no-repeat;
+}
+
+/* Boards saved before thumbnails existed keep the plain tile rather than a broken
+   image, so the grid stays even. */
+.easel-card-thumb.has-thumb {
+  background-color: transparent;
+}
+
+.easel-card-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.easel-card-meta {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The new-easel tile mirrors the card shape so the grid reads as one row of equals. */
+.easel-card-new .easel-card-plus {
+  aspect-ratio: 4 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 300;
+  opacity: 0.5;
+  border-radius: 6px;
+  border: 1px dashed var(--zen-border-color, rgba(128, 128, 128, 0.4));
+}
+
+.easel-card-new:hover .easel-card-plus {
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------- context menu */
+
+.easel-card-menu {
+  position: absolute;
+  z-index: 10;
+  min-width: 150px;
+  padding: 4px;
+  border-radius: var(--border-radius-medium, 8px);
+  border: 1px solid var(--zen-border-color, rgba(128, 128, 128, 0.3));
+  background: var(--zen-toolbar-element-bg, Field);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.easel-card-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.easel-card-menu-item:hover {
+  background: var(--zen-library-hover-bg, rgba(128, 128, 128, 0.16));
+}
+
+.easel-card-menu-item.is-danger {
+  color: #e2564a;
+}
+
+/* ------------------------------------------------------- sidebar + empty icon */
+
+.easels-icon {
+  /* Matches how the other sections' mask icons are drawn. */
+  opacity: 0.85;
+}

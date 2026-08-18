@@ -182,7 +182,12 @@
                         raw: liveDownload || d,
                         historyRaw: d
                     };
-                }).filter(d => d.timestamp && (this._searchTerm ? d.filename.toLowerCase().includes(this._searchTerm.toLowerCase()) : true));
+                // [audit] PERF-1 — the search term used to be applied here, which made the
+                // full download list a function of it and meant every keystroke re-ran
+                // DownloadHistory.getAll() plus an nsIFile.exists() per download. Filtering
+                // moved to renderList, so the fetched list is now search-independent and can
+                // be served from _cachedDownloads. Matches how Media does it.
+                }).filter(d => d.timestamp);
 
             } catch (e) {
                 console.error("ZenLibrary: Error fetching downloads", e);
@@ -281,6 +286,13 @@
                 this._container.innerHTML = "";
                 this._container.classList.add("scrollbar-visible");
 
+                // [audit] PERF-1 — the search filter lives here now rather than in
+                // fetchDownloads. See the note there.
+                if (this._searchTerm) {
+                    const term = this._searchTerm.toLowerCase();
+                    downloads = downloads.filter(d => d.filename.toLowerCase().includes(term));
+                }
+
                 if (downloads.length === 0) {
                     const emptyState = this.el("div", { className: "empty-state" }, [
                         this.el("div", { className: "empty-icon downloads-icon" }),
@@ -343,7 +355,12 @@
                             }
                             
                             itemEl.data = item; // Sets item data and status classes
-                            itemEl.setAttribute("icon", `moz-icon://${item.targetPath}?size=32`);
+                            // [audit] BUG-1 — was `moz-icon://${item.targetPath}?size=32`,
+                            // interpolating a raw Windows path into a URL. The drive colon
+                            // and every backslash need encoding, and a filename containing
+                            // ?, # or % swallowed the ?size= parameter. fileIconUrl() builds
+                            // it from a proper file: URI instead.
+                            itemEl.setAttribute("icon", window.ZenLibraryUtil.fileIconUrl(item.targetPath));
                             itemEl.setAttribute("title", item.filename);
                             itemEl.setAttribute("subtitle", `${this.formatBytes(item.size)} • ${item.status}`);
                             itemEl.setAttribute("time", timeStr);
@@ -431,6 +448,13 @@
             }
         }
 
+        // [audit] SEC-3 / BUG-1 — the icon declaration, with the URL escaped for CSS.
+        _iconStyle(targetPath) {
+            const url = window.ZenLibraryUtil.fileIconUrl(targetPath);
+            if (!url) return "";
+            return `background-image: url("${window.ZenLibraryUtil.cssUrl(url)}");`;
+        }
+
         createProgressItem(item) {
             const percentLabel = item.totalBytes > 0 ? `${Math.round(item.percent)}%` : "";
             const totalLabel = item.totalBytes > 0 ? this.formatBytes(item.totalBytes) : "Unknown size";
@@ -444,9 +468,12 @@
                 }
             }, [
                 this.el("div", { className: "download-progress-icon-container" }, [
+                    // [audit] SEC-3 / BUG-1 — this one reached el()'s `style` prop, which
+                    // assigns to cssText, so an unescaped filename here was not just a
+                    // broken icon but a way to inject whole CSS declarations into chrome.
                     this.el("div", {
                         className: "download-progress-icon",
-                        style: item.targetPath ? `background-image: url("moz-icon://${item.targetPath}?size=32");` : ""
+                        style: this._iconStyle(item.targetPath)
                     })
                 ]),
                 this.el("div", { className: "download-progress-main" }, [
@@ -479,12 +506,75 @@
             return row;
         }
 
+        // [audit] SEC-1 — extensions Windows will execute, or that execute something on its
+        // behalf. nsIFile.isExecutable() answers for the +x bit on Unix and for a handful of
+        // types on Windows, but it does not cover .lnk, .msi, .scr or the script hosts, so
+        // the list is checked as well rather than instead.
+        //
+        // Not an attempt at an exhaustive blocklist — Firefox keeps its own far longer one.
+        // The point is that the common ways a downloaded file runs code all reach a prompt.
+        static EXECUTABLE_EXTENSIONS = new Set([
+            "exe", "msi", "msp", "com", "scr", "pif", "cpl", "lnk", "url", "inf", "reg",
+            "bat", "cmd", "vb", "vbs", "vbe", "js", "jse", "ws", "wsf", "wsh", "wsc",
+            "ps1", "ps1xml", "ps2", "psc1", "msc", "jar", "app", "dmg", "pkg", "deb",
+            "rpm", "run", "sh", "bash", "command", "hta", "chm", "gadget", "appx", "appimage"
+        ]);
+
+        _isExecutable(file, filename) {
+            const ext = String(filename || "").split(".").pop().toLowerCase();
+            if (ZenLibraryDownloads.EXECUTABLE_EXTENSIONS.has(ext)) return true;
+            try {
+                return file.isExecutable();
+            } catch (e) {
+                // Cannot tell. Treat as executable — a spurious prompt costs a click, and
+                // the other way round costs arbitrary code execution.
+                return true;
+            }
+        }
+
+        // [audit] SEC-1 — this used to be a bare nsIFile.launch() reachable from a single
+        // click on the row. launch() is the raw shell-execute path: it bypasses everything
+        // Firefox's own Downloads panel does via Download.launch() →
+        // DownloadIntegration.launchDownload, which is where the executable confirmation and
+        // browser.download.always_ask_before_handling_new_types are applied. One stray click
+        // in the library ran a downloaded .exe with no prompt at all.
+        //
+        // So: prefer the real Download object's launch() when there is one — it is already
+        // held for pause/resume/cancel — and when falling back to nsIFile, confirm first for
+        // anything that can execute.
+        async _launch(item, file) {
+            if (item.raw && typeof item.raw.launch === "function") {
+                try {
+                    await item.raw.launch();
+                    return;
+                } catch (e) {
+                    console.error("[ZenLibrary Downloads] Download.launch failed, falling back:", e);
+                }
+            }
+
+            if (this._isExecutable(file, item.filename)) {
+                const proceed = Services.prompt.confirmEx(
+                    window,
+                    "Open this file?",
+                    `"${item.filename}" is an executable file. Opening it will run it on your ` +
+                    `computer with your account's permissions.\n\nOnly open files you trust.`,
+                    Services.prompt.BUTTON_POS_0 * Services.prompt.BUTTON_TITLE_IS_STRING +
+                    Services.prompt.BUTTON_POS_1 * Services.prompt.BUTTON_TITLE_CANCEL,
+                    "Open anyway", null, null, null, { value: false }
+                ) === 0;
+                if (!proceed) return;
+            }
+
+            file.launch();
+        }
+
         handleAction(item, action) {
             try {
                 if (action === "open-link") {
-                    window.gBrowser.selectedTab = window.gBrowser.addTab(item.url, {
-                        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                    });
+                    // [audit] SEC-2 — was a system triggering principal on a URL that comes
+                    // from the download's own metadata. That is what would let a javascript:
+                    // or data: entry load with privilege. Validated, then null principal.
+                    window.ZenLibraryUtil.openExternal(window, item.url);
                     window.gZenLibrary.close();
                     return;
                 }
@@ -510,15 +600,22 @@
                     return;
                 }
 
+                if (!item.targetPath) return;
                 const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
                 file.initWithPath(item.targetPath);
 
                 if (action === "open-external" || action === "open") {
-                    if (file.exists()) file.launch();
-                    else alert("File does not exist.");
+                    if (!file.exists()) {
+                        // Services.prompt, not alert(): alert() in a chrome window blocks the
+                        // whole window rather than just this dialog.
+                        Services.prompt.alert(window, "Zen Library", "That file is no longer there.");
+                        return;
+                    }
+                    this._launch(item, file).catch(e =>
+                        console.error("ZenLibrary: could not open the download", e));
                 } else if (action === "show") {
                     if (file.exists()) file.reveal();
-                    else alert("File does not exist.");
+                    else Services.prompt.alert(window, "Zen Library", "That file is no longer there.");
                 }
             } catch (e) {
                 console.error("ZenLibrary: Download action failed", e);
@@ -529,10 +626,29 @@
             // Placeholder
         }
 
+        // [audit] LEAK-2 — scheduleProgressRefresh arms a 1s timer that re-fetches and
+        // re-renders while a download is in flight, and it re-arms itself from renderList.
+        // Nothing cleared it, so a window closed mid-download left the chain running against
+        // a detached container.
+        destroy() {
+            if (this._progressTimer) {
+                clearTimeout(this._progressTimer);
+                this._progressTimer = null;
+            }
+            this._cachedDownloads = null;
+            this._container = null;
+        }
+
         _ensureContextMenu() {
             if (document.getElementById("zen-downloads-context-menu")) return;
             const popup = document.createXULElement("menupopup");
             popup.id = "zen-downloads-context-menu";
+
+            // [audit] SEC-1 — an explicit "Open file" entry, so opening a download is
+            // reachable as a deliberate act and not only as a side effect of clicking a row.
+            const openFileItem = document.createXULElement("menuitem");
+            openFileItem.id = "zen-downloads-ctx-open-file";
+            openFileItem.setAttribute("label", "Open file");
 
             const openLinkItem = document.createXULElement("menuitem");
             openLinkItem.id = "zen-downloads-ctx-open-link";
@@ -550,6 +666,7 @@
             deleteItem.id = "zen-downloads-ctx-delete";
             deleteItem.setAttribute("label", "Delete from history");
 
+            popup.appendChild(openFileItem);
             popup.appendChild(openLinkItem);
             popup.appendChild(pauseItem);
             popup.appendChild(document.createXULElement("menuseparator"));
@@ -563,10 +680,16 @@
             this._ensureContextMenu();
             const popup = document.getElementById("zen-downloads-context-menu");
 
-            for (const id of ["zen-downloads-ctx-open-link", "zen-downloads-ctx-pause", "zen-downloads-ctx-rename", "zen-downloads-ctx-delete"]) {
+            for (const id of ["zen-downloads-ctx-open-file", "zen-downloads-ctx-open-link", "zen-downloads-ctx-pause", "zen-downloads-ctx-rename", "zen-downloads-ctx-delete"]) {
                 const el = document.getElementById(id);
                 if (el) el.replaceWith(el.cloneNode(true));
             }
+
+            const openFileItem = document.getElementById("zen-downloads-ctx-open-file");
+            openFileItem.hidden = !item.targetPath || item.status === "deleted";
+            openFileItem.addEventListener("command", () => {
+                this.handleAction(item, "open");
+            });
 
             document.getElementById("zen-downloads-ctx-open-link").addEventListener("command", () => {
                 this.handleAction(item, "open-link");

@@ -1,18 +1,23 @@
 {
-  "id": "Zen Library",
-  "homepage": "https://github.com/JustAdumbPrsn/Zen-Library",
+  "id": "zen-library",
+  "homepage": "https://github.com/12th-devs/Zen-Library",
   "author": "JustADumbPrsn",
   "name": "Zen Library",
   "description": "Adds library feature to Zen Browser",
-  "version": "2.1 Zen 1.20.1b",
+  "version": "1.0.1-local",
   "createdAt": "2026-01-19",
-  "updatedAt": "2025-05-30",
-  "readme": "https://github.com/JustAdumbPrsn/Zen-Library/blob/main/README.md",
-  "image": "https://private-user-images.githubusercontent.com/73780892/537569729-bfa5ee66-77e0-4d95-943d-8958bc40046a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3Njg4MjYyNjQsIm5iZiI6MTc2ODgyNTk2NCwicGF0aCI6Ii83Mzc4MDg5Mi81Mzc1Njk3MjktYmZhNWVlNjYtNzdlMC00ZDk1LTk0M2QtODk1OGJjNDAwNDZhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAxMTklMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMTE5VDEyMzI0NFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWMxNmYxM2I4ODAxYWY5ODhiZmYzYjJhNTYxMjM2Y2YyMGE4NDgzMDY0MjljZmI2NzU0MDY4MzcyODU3YmE1NGYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.t322wCGGP9ex9A4w_g_NFBgfXEzVcxi78UC_FjZJCMo",
+  "updatedAt": "2026-08-16",
+  "readme": "https://github.com/12th-devs/Zen-Library/blob/main/README.md",
+  "preferences": "preferences.json",
   "style": {
     "chrome": "ZenLibrary.css"
   },
   "scripts": {
+    "lib/util.uc.js": {
+      "name": "Zen Library shared helpers",
+      "description": "URL validation, CSS escaping and the element helper. Loaded first: every feature module reads it.",
+      "include": ["chrome://browser/content/browser.xhtml"]
+    },
     "features/Downloads.uc.js": {
       "name": "Zen Library Downloads",
       "description": "Downloads Module",
@@ -36,6 +41,11 @@
     "features/Boosts.uc.js": {
       "name": "Zen Library Boosts",
       "description": "Boosts Module",
+      "include": ["chrome://browser/content/browser.xhtml"]
+    },
+    "features/Easels.uc.js": {
+      "name": "Zen Library Easels",
+      "description": "Easels Module — lists boards stored by the zen-easel mod",
       "include": ["chrome://browser/content/browser.xhtml"]
     },
     "ZenLibrary.uc.js": {

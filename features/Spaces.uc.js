@@ -225,9 +225,12 @@
 
                 let iconEl;
                 if (ws.icon && (ws.icon.includes("/") || ws.icon.startsWith("data:"))) {
+                    // [audit] SEC-3 — ws.icon is stored workspace data and this string is
+                    // assigned to cssText by el(), so an unescaped quote in it injected CSS
+                    // declarations into privileged chrome rather than merely breaking a mask.
                     iconEl = this.el("div", {
                         className: "library-workspace-icon",
-                        style: `mask-image: url("${ws.icon}");`
+                        style: `mask-image: url("${window.ZenLibraryUtil.cssUrl(ws.icon)}");`
                     });
                 } else if (ws.icon && ws.icon.trim().length > 0) {
                     iconEl = this.el("span", { textContent: ws.icon, className: "library-workspace-icon-text" });

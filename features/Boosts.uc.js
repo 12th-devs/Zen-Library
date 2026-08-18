@@ -280,9 +280,12 @@
 
                     // Favicon
                     const iconContainer = this.el("div", { className: "item-icon-container" });
+                    // [audit] SEC-3 — `domain` is stored data, and this string is assigned to
+                    // cssText, so an unescaped quote in it injected CSS declarations into
+                    // privileged chrome rather than merely breaking a favicon.
                     iconContainer.appendChild(this.el("div", {
                         className: "item-icon",
-                        style: `background-image: url('page-icon:https://${domain}');`
+                        style: `background-image: url("${window.ZenLibraryUtil.cssUrl(`page-icon:https://${domain}`)}");`
                     }));
                     row.appendChild(iconContainer);
 
@@ -309,9 +312,10 @@
 
                     row.onclick = (e) => {
                         if (e.target.closest(".boosts-toggle")) return;
-                        window.gBrowser.selectedTab = window.gBrowser.addTab(`https://${domain}`, {
-                            triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                        });
+                        // [audit] SEC-2 — `domain` comes from boost storage, so the string
+                        // being navigated to is not one this code produced. Validated, then
+                        // opened with a null triggering principal rather than a system one.
+                        if (!window.ZenLibraryUtil.openExternal(window, `https://${domain}`)) return;
                         window.gZenLibrary.close();
                     };
 

@@ -2,6 +2,13 @@
 
 (function () {
     class ZenLibraryMedia {
+        // [audit] PERF-1 — hoisted to statics. These three lists were declared as locals in
+        // both fetchDownloads() and renderList(), which meant six array literals rebuilt on
+        // every render and two copies that could drift apart.
+        static IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp", "tiff", "tif", "heic", "heif"];
+        static VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov", "m4v", "3gp", "mpg", "mpeg", "flv", "ts", "ogv", "wmv"];
+        static AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
+
         constructor(library) {
             this.library = library;
             this._container = null;
@@ -14,6 +21,23 @@
             this._durations = new Map();
             this._coverCache = new Map();
             this._fileCache = new Map(); // Cache for Gecko File objects
+
+            // [audit] PERF-1 — the scan cache. See fetchDownloads().
+            this._scanCache = null;
+            this._scanAt = 0;
+            this._scanPromise = null;
+
+            // [audit] LEAK-1 — every blob: URL this module hands out is recorded here so
+            // destroy() can revoke it. Previously nothing was ever revoked and there was no
+            // destroy() at all, so cover art accumulated for the lifetime of the window.
+            this._objectUrls = new Set();
+        }
+
+        // [audit] LEAK-1 — one place that mints blob URLs, so one place has to remember them.
+        _objectUrl(blob) {
+            const url = URL.createObjectURL(blob);
+            this._objectUrls.add(url);
+            return url;
         }
 
         async copyFile(item) {
@@ -64,6 +88,9 @@
                         filterBar.querySelectorAll(".media-filter-pill").forEach(p => p.classList.remove("active"));
                         pill.classList.add("active");
                         this._stopCurrentAudio(); // STOP ON FILTER CHANGE
+                        // [audit] PERF-1 — filtering is a pure function of the list that has
+                        // already been fetched. This used to re-walk the Downloads folder on
+                        // every pill click; fetchDownloads() now serves it from the cache.
                         this.fetchDownloads().then(downloads => {
                             this._container.classList.remove("library-content-fade-in");
                             void this._container.offsetWidth; // Force reflow
@@ -123,18 +150,34 @@
             return wrapper;
         }
 
+        // [audit] SEC-4 — the MIME type is parsed out of the file's own metadata, so it is
+        // attacker-controlled for any file the user downloaded. It ends up as a Blob type
+        // behind a blob: URL created in privileged chrome. The URL only ever reaches an
+        // <img src>, so this is contained today — but there is no reason to mint a
+        // chrome-origin blob: URL claiming to be text/html or image/svg+xml on the strength
+        // of four bytes in an ID3 frame.
+        static COVER_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+        _coverMime(raw) {
+            const mime = String(raw || "").trim().toLowerCase();
+            if (ZenLibraryMedia.COVER_MIME_TYPES.has(mime)) return mime;
+            // ID3v2.2 uses a three-character format code ("JPG"/"PNG") rather than a MIME type.
+            if (mime === "jpg" || mime === "jpeg") return "image/jpeg";
+            if (mime === "png") return "image/png";
+            return "image/jpeg";
+        }
+
         async _extractCover(file) {
             try {
-                // Read first 2MB to be safe for MP4/FLAC metadata
-                const stream = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(Ci.nsIFileInputStream);
-                stream.init(file, 0x01, 0o444, 0);
-                const bis = Cc["@mozilla.org/binaryinputstream;1"].createInstance(Ci.nsIBinaryInputStream);
-                bis.setInputStream(stream);
+                // [audit] PERF-2 — was nsIFileInputStream + nsIBinaryInputStream.readByteArray,
+                // a blocking 2 MB main-thread read per audio file. IOUtils.read does the same
+                // work off-thread.
+                //
+                // Read the first 2MB to be safe for MP4/FLAC metadata.
+                const bytes = await IOUtils.read(file.path, { maxBytes: 2048 * 1024 });
+                if (!bytes || bytes.length < 16) return null;
 
-                const bytes = bis.readByteArray(Math.min(file.fileSize, 2048 * 1024));
-                stream.close();
-
-                const view = new DataView(new Uint8Array(bytes).buffer);
+                const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
                 // 1. ID3v2 (MP3/WAV)
                 if (view.getUint8(0) === 0x49 && view.getUint8(1) === 0x44 && view.getUint8(2) === 0x33) {
@@ -171,7 +214,7 @@
                             const dataSize = (offset + 10 + frameSize) - innerOffset;
                             if (dataSize <= 0) return null;
                             const data = bytes.slice(innerOffset, innerOffset + dataSize);
-                            return URL.createObjectURL(new Blob([new Uint8Array(data)], { type: mimeType || "image/jpeg" }));
+                            return this._objectUrl(new Blob([data], { type: this._coverMime(mimeType) }));
                         }
                         if (frameSize <= 0) break;
                         offset += 10 + frameSize;
@@ -197,7 +240,10 @@
                             pOffset += descLen + 16; // Skip desc, w, h, d, c
                             const dataLen = view.getUint32(pOffset); pOffset += 4;
                             if (pOffset + dataLen <= bytes.length) {
-                                return URL.createObjectURL(new Blob([new Uint8Array(bytes.slice(pOffset, pOffset + dataLen))], { type: mimeType || "image/jpeg" }));
+                                return this._objectUrl(new Blob(
+                                    [bytes.slice(pOffset, pOffset + dataLen)],
+                                    { type: this._coverMime(mimeType) }
+                                ));
                             }
                         }
                         offset += 4 + blockSize;
@@ -211,7 +257,10 @@
                     while (i < end - 8) {
                         const size = view.getUint32(i);
                         const type = String.fromCharCode(view.getUint8(i + 4), view.getUint8(i + 5), view.getUint8(i + 6), view.getUint8(i + 7));
-                        if (size === 0) break;
+                        // [audit] A size below the 8-byte atom header is malformed. It used
+                        // to only break on exactly 0, so sizes 1-7 walked the whole buffer a
+                        // byte or two at a time before giving up.
+                        if (size < 8) break;
                         if (type === target) return { start: i + 8, end: i + size };
                         i += size;
                     }
@@ -238,7 +287,10 @@
                                             const pOffset = data.start + 8;
                                             const dataLen = (data.end - data.start) - 8;
                                             if (pOffset + dataLen <= bytes.length) {
-                                                return URL.createObjectURL(new Blob([new Uint8Array(bytes.slice(pOffset, pOffset + dataLen))], { type: "image/jpeg" }));
+                                                return this._objectUrl(new Blob(
+                                                    [bytes.slice(pOffset, pOffset + dataLen)],
+                                                    { type: "image/jpeg" }
+                                                ));
                                             }
                                         }
                                     }
@@ -251,90 +303,151 @@
             return null;
         }
 
-        async fetchDownloads() {
-            try {
-                const getDir = (key) => {
-                    try {
-                        return Services.dirsvc.get(key, Ci.nsIFile);
-                    } catch (e) { return null; }
-                };
+        // [audit] PERF-1 — this was a fully synchronous recursive nsIFile walk
+        // (directoryEntries / isDirectory / fileSize / lastModifiedTime are all blocking
+        // main-thread I/O), and it was called straight from the search box's oninput and
+        // from every filter-pill click. On a large Downloads folder that stalled the entire
+        // browser UI once per keystroke.
+        //
+        // Three changes, in order of how much they matter:
+        //   1. IOUtils.getChildren / IOUtils.stat instead — genuinely off-thread.
+        //   2. A short-lived cache, so repeated calls within CACHE_MS reuse the last scan.
+        //      Searching and filtering are pure functions of an already-fetched list; they
+        //      have no business touching the disk at all. See renderList's callers.
+        //   3. File.createFromNsIFile is no longer called for every file up front. It was
+        //      building a Gecko File object for every media file in Downloads on every
+        //      scan, purely so that a drag *might* be instant. It is now created on demand
+        //      in the dragstart handler, which is early enough.
+        static CACHE_MS = 5000;
 
-                let downloadsDir = getDir("Dwnld"); // OS Downloads
-                if (!downloadsDir) {
-                    const home = getDir("Home");
-                    if (home) {
-                        downloadsDir = home.clone();
-                        downloadsDir.append("Downloads");
-                    }
+        async fetchDownloads({ force = false } = {}) {
+            if (!force && this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
+                return this._scanCache;
+            }
+            // Collapse concurrent callers onto one scan rather than starting several.
+            if (this._scanPromise) return this._scanPromise;
+
+            this._scanPromise = this._scan()
+                .then(files => {
+                    this._scanCache = files;
+                    this._scanAt = Date.now();
+                    return files;
+                })
+                .catch(e => {
+                    console.error("ZenLibrary: Error scanning downloads", e);
+                    return this._scanCache || [];
+                })
+                .finally(() => { this._scanPromise = null; });
+
+            return this._scanPromise;
+        }
+
+        async _scan() {
+            const getDir = (key) => {
+                try {
+                    return Services.dirsvc.get(key, Ci.nsIFile);
+                } catch (e) { return null; }
+            };
+
+            let downloadsDir = getDir("Dwnld"); // OS Downloads
+            if (!downloadsDir) {
+                const home = getDir("Home");
+                if (home) {
+                    downloadsDir = home.clone();
+                    downloadsDir.append("Downloads");
                 }
-
-                if (!downloadsDir || !downloadsDir.exists() || !downloadsDir.isDirectory()) {
-                    console.error("ZenLibrary: Could not find Downloads directory");
-                    return [];
-                }
-
-                const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp", "tiff", "tif", "heic", "heif"];
-                const VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov", "m4v", "3gp", "mpg", "mpeg", "flv", "ts", "ogv", "wmv"];
-                const AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
-                const MEDIA_EXTS = [...IMAGE_EXTS, ...VIDEO_EXTS, ...AUDIO_EXTS];
-
-                const mediaFiles = [];
-
-                const scanDir = (dir, depth = 0) => {
-                    if (depth > 3) return;
-                    try {
-                        const entries = dir.directoryEntries;
-                        while (entries.hasMoreElements()) {
-                            const file = entries.getNext().QueryInterface(Ci.nsIFile);
-                            try {
-                                if (file.isDirectory()) {
-                                    if (file.leafName.startsWith(".")) continue;
-                                    scanDir(file, depth + 1);
-                                    continue;
-                                }
-
-                                const filename = file.leafName;
-                                const ext = filename.split('.').pop().toLowerCase();
-
-                                if (!MEDIA_EXTS.includes(ext)) continue;
-
-                                let contentType = "";
-                                if (IMAGE_EXTS.includes(ext)) contentType = "image/" + (ext === "jpg" ? "jpeg" : ext);
-                                else if (VIDEO_EXTS.includes(ext)) contentType = "video/" + ext;
-                                else if (AUDIO_EXTS.includes(ext)) contentType = "audio/" + ext;
-
-                                const item = {
-                                    id: `local_${file.path}_${file.lastModifiedTime}`,
-                                    filename: filename,
-                                    size: file.fileSize,
-                                    status: "completed",
-                                    url: Services.io.newFileURI(file).spec,
-                                    contentType: contentType,
-                                    timestamp: file.lastModifiedTime,
-                                    targetPath: file.path,
-                                    file: file,
-                                    raw: { target: { path: file.path }, lastModified: file.lastModifiedTime }
-                                };
-
-                                // Background cache valid File objects for instant high-quality drags
-                                if (!this._fileCache.has(item.id)) {
-                                    File.createFromNsIFile(file).then(geckoFile => {
-                                        this._fileCache.set(item.id, geckoFile);
-                                    }).catch(e => { });
-                                }
-
-                                mediaFiles.push(item);
-                            } catch (e) { }
-                        }
-                    } catch (e) { }
-                };
-
-                scanDir(downloadsDir);
-                return mediaFiles;
-            } catch (e) {
-                console.error("ZenLibrary: Error scanning downloads", e);
+            }
+            if (!downloadsDir) {
+                console.error("ZenLibrary: Could not find Downloads directory");
                 return [];
             }
+
+            const root = downloadsDir.path;
+            if (!(await IOUtils.exists(root))) {
+                console.error("ZenLibrary: Downloads directory does not exist:", root);
+                return [];
+            }
+
+            const IMAGE_EXTS = ZenLibraryMedia.IMAGE_EXTS;
+            const VIDEO_EXTS = ZenLibraryMedia.VIDEO_EXTS;
+            const AUDIO_EXTS = ZenLibraryMedia.AUDIO_EXTS;
+
+            const mediaFiles = [];
+            // Breadth-first with an explicit queue rather than recursion, so the depth cap
+            // is a property of the traversal instead of the call stack, and so a directory
+            // that fails to read cannot abandon its siblings.
+            let level = [root];
+            for (let depth = 0; depth <= 3 && level.length; depth++) {
+                const next = [];
+                for (const dir of level) {
+                    let children;
+                    try {
+                        children = await IOUtils.getChildren(dir);
+                    } catch (e) {
+                        continue;
+                    }
+
+                    for (const path of children) {
+                        const name = PathUtils.filename(path);
+                        if (name.startsWith(".")) continue;
+
+                        let info;
+                        try {
+                            info = await IOUtils.stat(path);
+                        } catch (e) {
+                            continue;
+                        }
+
+                        if (info.type === "directory") {
+                            next.push(path);
+                            continue;
+                        }
+
+                        const ext = name.split(".").pop().toLowerCase();
+                        let contentType = "";
+                        if (IMAGE_EXTS.includes(ext)) contentType = "image/" + (ext === "jpg" ? "jpeg" : ext);
+                        else if (VIDEO_EXTS.includes(ext)) contentType = "video/" + ext;
+                        else if (AUDIO_EXTS.includes(ext)) contentType = "audio/" + ext;
+                        else continue;
+
+                        // nsIFile is still what the drag path and the cover reader want, but
+                        // it is now built from a path already known to be a file, so none of
+                        // the blocking probes above happen.
+                        let file;
+                        try {
+                            file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+                            file.initWithPath(path);
+                        } catch (e) {
+                            continue;
+                        }
+
+                        const modified = info.lastModified || 0;
+                        const id = `local_${path}_${modified}`;
+
+                        // No File object is built here. The drag carries the file as an
+                        // application/x-moz-file nsIFile via mozSetDataAt, which is
+                        // synchronous and needs nothing warmed ahead of it — see the
+                        // dragstart handler. A Gecko File is only wanted on the fallback path
+                        // for a build without mozSetDataAt, and the card's pointerdown
+                        // handler covers that.
+                        mediaFiles.push({
+                            id,
+                            filename: name,
+                            size: info.size || 0,
+                            status: "completed",
+                            url: Services.io.newFileURI(file).spec,
+                            contentType,
+                            timestamp: modified,
+                            targetPath: path,
+                            file,
+                            raw: { target: { path }, lastModified: modified }
+                        });
+                    }
+                }
+                level = next;
+            }
+
+            return mediaFiles;
         }
 
         renderList(downloads) {
@@ -342,9 +455,7 @@
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
 
-            const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp", "tiff", "tif", "heic", "heif"];
-            const VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov", "m4v", "3gp", "mpg", "mpeg", "flv", "ts", "ogv", "wmv"];
-            const AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
+            const { IMAGE_EXTS, VIDEO_EXTS, AUDIO_EXTS } = ZenLibraryMedia;
 
             const mediaItems = downloads.filter(d => {
                 const ext = d.filename.split('.').pop().toLowerCase();
@@ -442,6 +553,16 @@
                     className: `media-card ${isAudio && this._playingId === item.id ? 'playing' : ''}`,
                     dataset: { id: item.id },
                     draggable: true,
+                    // A drag always begins with a press, and a press is followed by movement
+                    // before dragstart fires. That gap is enough for File.createFromNsIFile
+                    // to land, so this covers the one case the scan's warming cannot: a card
+                    // dragged before the warming promise for it has resolved.
+                    onpointerdown: () => {
+                        if (this._fileCache.has(item.id) || !item.file) return;
+                        File.createFromNsIFile(item.file)
+                            .then(f => this._fileCache.set(item.id, f))
+                            .catch(() => { });
+                    },
                     ondragstart: (e) => {
                         // Reset webview position during drag
                         document.documentElement.setAttribute("zen-library-dragging", "true");
@@ -507,21 +628,60 @@
                             dataTransfer.setDragImage(ghost, 80, 50);
                             setTimeout(() => ghost.remove(), 0);
 
-                            // Native transfer
-                            dataTransfer.setData("application/x-moz-file", item.file);
+                            // Native transfer.
+                            //
+                            // EXACTLY ONE file flavour may be attached. dataTransfer.files is
+                            // built from every application/x-moz-file item on the transfer,
+                            // and zen-easel's drop handler loops over that list placing each
+                            // one 24px down and right of the last — so attaching the file
+                            // twice puts two overlapping copies on the board.
+                            //
+                            // That is not hypothetical: the original code called both
+                            // setData("application/x-moz-file", item.file) and items.add(),
+                            // and got away with it only because setData is specified to take
+                            // a DOMString. The nsIFile was stringified into something inert,
+                            // so the flavour never actually existed and items.add() was doing
+                            // all the work. Switching that line to mozSetDataAt made it real,
+                            // and the duplicate appeared.
+                            //
+                            // mozSetDataAt is preferred as the one that carries the file: it
+                            // is the documented way to put a non-string on a DataTransfer, it
+                            // is what the Downloads section already uses, and — unlike
+                            // items.add — it is synchronous and needs no warmed File object.
+                            const usedNativeFlavor = typeof dataTransfer.mozSetDataAt === "function";
+                            if (usedNativeFlavor) {
+                                dataTransfer.mozSetDataAt("application/x-moz-file", item.file, 0);
+                            }
+
                             const specStr = Services.io.newFileURI(item.file).spec;
                             dataTransfer.setData("text/uri-list", specStr);
+                            // The filename, as a last resort for a drop target that
+                            // understands nothing else. Note that the easel treats a bare
+                            // text/plain drop as "make a text object", so if this is the only
+                            // flavour that survives, a dropped picture becomes its own
+                            // filename on the board. That is the symptom to look for if the
+                            // file flavours above ever stop arriving.
                             dataTransfer.setData("text/plain", item.filename);
 
-                            // FULL CONTENT TRANSFER: Use cached Gecko File object
-                            const cachedGeckoFile = this._fileCache.get(item.id);
-                            if (cachedGeckoFile) {
-                                dataTransfer.items.add(cachedGeckoFile);
-                            } else {
-                                // Background was too slow? Try to create one now (may lag slightly but ensures content)
-                                File.createFromNsIFile(item.file).then(f => {
-                                    this._fileCache.set(item.id, f);
-                                }).catch(() => { });
+                            // Fallback only, for a build with no mozSetDataAt. Never runs
+                            // alongside the native flavour above — see the duplicate note
+                            // there. items.add() needs a File that already exists, because
+                            // dragstart is synchronous and cannot await one into being; the
+                            // cache is warmed during the scan and topped up on pointerdown
+                            // for exactly that reason.
+                            if (!usedNativeFlavor) {
+                                const cachedGeckoFile = this._fileCache.get(item.id);
+                                if (cachedGeckoFile) {
+                                    dataTransfer.items.add(cachedGeckoFile);
+                                } else {
+                                    console.warn(
+                                        "[ZenLibrary Media] no File cached for", item.filename,
+                                        "— this drag carries only the path flavours"
+                                    );
+                                    File.createFromNsIFile(item.file).then(f => {
+                                        this._fileCache.set(item.id, f);
+                                    }).catch(() => { });
+                                }
                             }
 
                             e.stopPropagation();
@@ -838,6 +998,28 @@
             const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        }
+
+        // [audit] LEAK-1 — this module had no destroy() at all, so ZenLibrary.destroy()'s
+        // cleanup loop skipped it entirely. Every cover-art blob: URL and a Gecko File
+        // object for every media file in the Downloads folder stayed pinned for the whole
+        // lifetime of the browser window, and a Sine rebuild added another set.
+        //
+        // Modelled on Easels.destroy(), which already did this correctly.
+        destroy() {
+            try { this._stopCurrentAudio(); } catch (e) { }
+
+            for (const url of this._objectUrls) {
+                try { URL.revokeObjectURL(url); } catch (e) { }
+            }
+            this._objectUrls.clear();
+
+            this._coverCache.clear();
+            this._fileCache.clear();
+            this._durations.clear();
+            this._scanCache = null;
+            this._scanPromise = null;
+            this._container = null;
         }
     }
 

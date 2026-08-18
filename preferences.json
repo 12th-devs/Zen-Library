@@ -1,0 +1,38 @@
+[
+  {
+    "type": "text",
+    "label": "Zen Library",
+    "size": "20px",
+    "margin": "18px 0 2px 0"
+  },
+  {
+    "type": "text",
+    "label": "Downloads, media, history, easels, spaces and boosts in one panel. Open it with Alt+Shift+B, or from the button beside the workspace indicator.",
+    "size": "12px",
+    "margin": "0 0 6px 0"
+  },
+
+  {
+    "type": "separator",
+    "label": "Shortcuts",
+    "margin": "20px 0 10px 0"
+  },
+  {
+    "type": "text",
+    "label": "Zen Library takes over Ctrl+H and Ctrl+J so they open its own History and Downloads sections instead of Firefox's panels. Turn either off to hand the key back — to the native panel, and to web pages that bind it.",
+    "size": "12px",
+    "margin": "0 0 8px 0"
+  },
+  {
+    "type": "checkbox",
+    "property": "zen.library.shortcut.history",
+    "label": "Ctrl+H (Cmd+H on macOS) opens the Library's History",
+    "defaultValue": true
+  },
+  {
+    "type": "checkbox",
+    "property": "zen.library.shortcut.downloads",
+    "label": "Ctrl+J (Cmd+J on macOS) opens the Library's Downloads",
+    "defaultValue": true
+  }
+]

@@ -15,15 +15,32 @@
             this._lastGroupLabel = null;
             this._isFetching = false;
             this._initialized = false; // Track if data has been pre-fetched
+            this._unsubscribe = null;  // [audit] BUG-2 — store subscription, released in destroy()
         }
 
         /**
-         * Background initialization - called at startup to pre-fetch data
+         * Background initialization - called at startup to pre-fetch data.
+         *
+         * [audit] BUG-2 — this class used to declare init() twice. In a class body the
+         * second declaration silently replaces the first, so the one that actually ran was
+         * the *other* one further down: no re-entrancy guard, and a fresh store subscription
+         * added on every call. The two are merged here and the duplicate is gone.
          */
         async init() {
             if (this._isFetching || this._initialized) return;
             this._isFetching = true;
             try {
+                // Subscribed once, on the first init only, so repeated calls cannot stack up
+                // listeners that each re-render the list.
+                if (!this._unsubscribe && this.library.store) {
+                    this._unsubscribe = this.library.store.subscribe((state) => {
+                        if (state.history && state.history !== this._items) {
+                            this._items = state.history;
+                            // Only re-render if we are already displaying something.
+                            if (this._container) this.renderBatch(true);
+                        }
+                    });
+                }
                 await this.fetchHistory();
                 this._initialized = true;
             } catch (e) {
@@ -231,21 +248,24 @@
             }
         }
 
-        async init() {
-            if (this.library.store) {
-                this.library.store.subscribe((state) => {
-                    if (state.history && state.history !== this._items) {
-                        this._items = state.history;
-                        // Only re-render if we are already displaying something or it's the first load
-                        if (this._container) this.renderBatch(true);
-                    }
-                });
+        // [audit] BUG-2 — a second `async init()` used to live here, silently overriding the
+        // guarded one at the top of the class. Its body has been folded into that one; this
+        // is where it was.
+
+        // Releases the store subscription taken in init(). Called from destroy().
+        _unsubscribeStore() {
+            if (this._unsubscribe) {
+                try { this._unsubscribe(); } catch (e) { }
+                this._unsubscribe = null;
             }
-            await this.fetchHistory();
-            this._initialized = true;
         }
 
-        // ... Sync ...
+        destroy() {
+            this._unsubscribeStore();
+            this._container = null;
+            this._closedWindowsContainer = null;
+            this._wrapper = null;
+        }
 
         async fetchHistory() {
             this._isLoading = true;
@@ -370,9 +390,12 @@
                         }
 
                         itemEl.onclick = () => {
-                            window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
-                                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                            });
+                            // [audit] SEC-2 — was a system triggering principal on a URI read
+                            // straight out of the Places database. Places will happily store
+                            // data: and other non-web schemes, and a system principal is what
+                            // makes those load *with privilege* rather than merely load.
+                            // Validated against a scheme allowlist, then a null principal.
+                            if (!window.ZenLibraryUtil.openExternal(window, item.uri)) return;
                             window.gZenLibrary.close();
                         };
 
@@ -431,8 +454,11 @@
             return browserWindow.SessionStore || window.SessionStore || window.opener?.SessionStore || null;
         }
 
+        // [audit] SEC-3 — this was the only correct copy of this escaping in the mod, and it
+        // was used at exactly one of the four places that needed it. It now delegates to the
+        // shared helper so the other three cannot drift away from it again.
         _cssUrlValue(url) {
-            return String(url || "about:blank").replace(/["\\\n\r\f]/g, "\\$&");
+            return window.ZenLibraryUtil.cssUrl(url || "about:blank");
         }
 
         _ensureContextMenu() {
