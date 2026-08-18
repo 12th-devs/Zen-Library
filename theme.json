@@ -1,13 +1,13 @@
 {
   "id": "zen-library",
-  "homepage": "https://github.com/12th-devs/Zen-Library",
-  "author": "JustADumbPrsn",
-  "name": "Zen Library",
-  "description": "Adds library feature to Zen Browser",
+  "homepage": "https://github.com/trashshii007/Zen-Library",
+  "author": "immyneedscake",
+  "name": "Zen Library - edited for Zen-easels",
+  "description": "Adds library feature to Zen Browser and compatability for zen-easels.",
   "version": "1.0.1-local",
   "createdAt": "2026-01-19",
   "updatedAt": "2026-08-16",
-  "readme": "https://github.com/12th-devs/Zen-Library/blob/main/README.md",
+  "readme": "https://github.com/trashshii007/Zen-Library",
   "preferences": "preferences.json",
   "style": {
     "chrome": "ZenLibrary.css"
