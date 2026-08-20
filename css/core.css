@@ -191,23 +191,8 @@
   flex-direction: column;
   gap: 6px;
   align-items: center;
-  /* `safe` so that when the tabs do not fit, they overflow off the *end* only.
-     Plain `center` overflows equally at both ends, which clips the first tab
-     into the padding with no way to scroll back up to it. */
-  justify-content: safe center;
+  justify-content: center;
   width: 100%;
-  /* Six tabs (upstream ships five) plus Exit Library need ~545px of sidebar.
-     Without min-height:0 this flex item keeps its full content height, wins the
-     space fight against Exit Library — which is only held down by margin-top:auto
-     — and pushes it past the bottom edge of a short window. Let the tab strip
-     shrink and scroll instead; Exit Library then always has its row. */
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-
-#zen-library-sidebar-container .sidebar-items::-webkit-scrollbar {
-  display: none;
 }
 
 .sidebar-button {
