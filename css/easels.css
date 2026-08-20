@@ -5,11 +5,36 @@
  */
 
 .easel-card-grid {
+  /* absolute + inset:0 inside .library-content (position:relative; overflow:hidden),
+     matching .media-grid and .library-list-container. Every other section does this;
+     Easels was laid out in flow, so the grid took its full content height, and that
+     height propagated up .library-content -> #zen-library-main-panel -> :host, whose
+     height:100% then had no definite parent to resolve against. The whole element
+     grew past the window (991px against an 868px window) and carried the sidebar's
+     Exit Library below the fold with it. Out of flow, the grid can no longer size
+     anything above it. */
+  position: absolute;
+  inset: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* Rows keep their natural height rather than stretching to fill the box now that
+     the grid is as tall as the panel. */
+  align-content: start;
   gap: 10px;
   padding: 4px 2px 12px 2px;
-  position: relative;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
+}
+
+/* Easels appends its empty state into the grid itself rather than beside it, so it
+   has to span every column and stretch: .empty-state is height:100% and centers its
+   own contents, which means nothing while it is one 140px cell in column 1. */
+.easel-card-grid > .empty-state {
+  grid-column: 1 / -1;
+  align-self: stretch;
 }
 
 .easel-card {
