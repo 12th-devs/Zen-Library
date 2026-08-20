@@ -168,7 +168,7 @@
   z-index: 2;
   position: relative;
   background: transparent !important;
-  animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
+  animation: blockSlideIn 0.15s var(--zen-library-easing) 0s both;
   -moz-window-dragging;
 }
 
@@ -179,7 +179,7 @@
 }
 
 :host(.closing) #zen-library-sidebar-container {
-  animation: blockSlideOut 0.15s var(--zen-library-easing) both;
+  animation: blockSlideOut 0.12s var(--zen-library-easing) both;
 }
 
 :host([right-side].closing) #zen-library-sidebar-container {
@@ -300,7 +300,7 @@
   padding: 16px 0 0 0;
   box-sizing: border-box;
   z-index: 1;
-  animation: blockSlideIn 0.2s var(--zen-library-easing) 0s both;
+  animation: blockSlideIn 0.15s var(--zen-library-easing) 0s both;
   flex-shrink: 0;
   flex-grow: 0;
   min-height: 0;
@@ -315,7 +315,7 @@
 }
 
 :host(.closing) #zen-library-main-panel {
-  animation: blockSlideOut 0.15s var(--zen-library-easing) both;
+  animation: blockSlideOut 0.12s var(--zen-library-easing) both;
 }
 
 :host([right-side].closing) #zen-library-main-panel {
@@ -325,12 +325,12 @@
 .library-header,
 .library-content {
   opacity: 0;
-  animation: contentFadeIn 0.2s ease-in both;
+  animation: contentFadeIn 0.12s ease-in both;
 }
 
 :host(.closing) .library-header,
 :host(.closing) .library-content {
-  animation: contentFadeOut 0.15s ease-in both;
+  animation: contentFadeOut 0.1s ease-in both;
 }
 
 .library-content {
