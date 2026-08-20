@@ -1,6 +1,8 @@
 # Zen-Library
 A Sine mod which adds Library feature to Zen Browser
 
+Forked to add compatibility to Zen-Easel (https://github.com/trashshii007/zen-easel) and fix a few bugs.
+
 Press hotkey "**Alt Shift B**"
 
 <img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/f99ca9a6-8c96-4053-b9cb-3f7313becb13" />
