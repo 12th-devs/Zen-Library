@@ -4,9 +4,9 @@
   "author": "immyneedscake",
   "name": "Zen Library - edited for Zen-easels",
   "description": "Adds library feature to Zen Browser and compatability for zen-easels.",
-  "version": "1.0.1-local",
+  "version": "1.1.0-local",
   "createdAt": "2026-01-19",
-  "updatedAt": "2026-08-16",
+  "updatedAt": "2026-08-20",
   "readme": "https://github.com/trashshii007/Zen-Library",
   "preferences": "preferences.json",
   "style": {
