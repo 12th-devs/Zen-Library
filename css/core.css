@@ -25,21 +25,18 @@
   );
 }
 
-#zen-library-button .toolbarbutton-icon,
-#zen-library-sidebar-button .toolbarbutton-icon {
+/* Declared the way Firefox declares its own toolbar icons: list-style-image goes on the
+   button, not on .toolbarbutton-icon (see toolbarbutton-icons.css, `#back-button { ... }`).
+   Every .toolbarbutton-1 already carries `-moz-context-properties: fill, fill-opacity`
+   and `fill: var(--toolbarbutton-icon-fill)` from that same file, and the icon is drawn
+   with context-fill, so it takes its colour from the theme exactly like every other
+   toolbar icon.
+
+   Nothing else is set here on purpose. Size, hover highlight, radius and press state all
+   come from whatever theme is active, so this button is styled by a theme's generic
+   toolbar-button rules instead of carrying one theme's look baked into the mod. */
+#zen-library-button {
   list-style-image: url("chrome://sine/content/zen-library/resources/zen-library.svg");
-  opacity: 0.6;
-}
-
-/* The sidebar button sits beside Zen's workspace indicator in #zen-sidebar-foot-buttons,
-   so it has to match the metrics of the buttons already there rather than a nav-bar
-   widget's. Label hidden: that row is icons only. */
-#zen-library-sidebar-button .toolbarbutton-text {
-  display: none;
-}
-
-#zen-library-sidebar-button:hover .toolbarbutton-icon {
-  opacity: 1;
 }
 
 .zen-library-container {
@@ -73,16 +70,6 @@
 
   to {
     transform: translateX(-90px);
-  }
-}
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
   }
 }
 
@@ -220,10 +207,16 @@
   font-weight: 600;
 }
 
+/* The six section icons are inline <svg> appended straight to .sidebar-button and are
+   sized by their own width/height attributes; .icon is what the Exit Library back-icon
+   and the fallback icon <div> use. Two blocks for this selector were merged: the second
+   set `transition: opacity`, which replaced the first's `transition: transform` outright
+   rather than adding to it, so the transform transition never ran. */
 .sidebar-button .icon {
   width: 32px;
   height: 32px;
-  transition: transform 0.3s var(--zen-library-easing);
+  opacity: 0.7;
+  transition: opacity 0.3s var(--zen-library-easing);
   position: relative;
   display: flex;
   align-items: center;
@@ -234,13 +227,6 @@
   width: 100%;
   height: 100%;
   overflow: visible;
-}
-
-.sidebar-button .icon path,
-.sidebar-button .icon rect,
-.sidebar-button .icon circle {
-  transition: all 0.3s var(--zen-library-easing);
-  vector-effect: non-scaling-stroke;
 }
 
 .sidebar-button .label {
@@ -256,27 +242,8 @@
   opacity: 1;
 }
 
-.sidebar-button .icon {
-  opacity: 0.7;
-  transition: opacity 0.3s var(--zen-library-easing);
-}
-
 .sidebar-button.active .icon {
   opacity: 1;
-}
-
-.sidebar-button.active .icon circle,
-.sidebar-button.active .icon .front-rect,
-.sidebar-button.active .icon .back-rect {
-  fill-opacity: 1 !important;
-}
-
-.media-icon .mountain {
-  fill-opacity: 0.7;
-}
-
-.sidebar-button.active .media-icon .mountain {
-  fill-opacity: 1 !important;
 }
 
 .sidebar-button-exit {

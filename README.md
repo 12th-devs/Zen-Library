@@ -3,7 +3,12 @@ A Sine mod which adds Library feature to Zen Browser
 
 Forked to add compatibility to Zen-Easel (https://github.com/trashshii007/zen-easel) and fix a few bugs.
 
-Press hotkey "**Alt Shift B**"
+Press hotkey "**Alt Shift B**", or click the **Library** button.
+
+The Library button is a normal toolbar widget: right-click the toolbar and choose
+**Customize Toolbar** to drag it anywhere in Zen's sidebar or nav-bar, or drag it
+off to remove it. Its position is remembered across restarts. By default it sits in
+the sidebar row next to the workspace indicator.
 
 <img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/f99ca9a6-8c96-4053-b9cb-3f7313becb13" />
 <img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/efbfd9ad-34de-4a24-934f-33131348f25c" />

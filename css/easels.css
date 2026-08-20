@@ -29,12 +29,12 @@
   scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
 }
 
-/* Easels appends its empty state into the grid itself rather than beside it, so it
-   has to span every column and stretch: .empty-state is height:100% and centers its
-   own contents, which means nothing while it is one 140px cell in column 1. */
+/* Easels appends its empty state into the grid itself rather than beside it, so it has
+   to span every column — otherwise it renders as one 140px cell in column 1. It stays in
+   the normal row flow on purpose: the "New easel" card is appended after it, and a
+   full-height empty state would push that card below the fold. */
 .easel-card-grid > .empty-state {
   grid-column: 1 / -1;
-  align-self: stretch;
 }
 
 .easel-card {

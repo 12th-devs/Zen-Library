@@ -7,9 +7,27 @@
   },
   {
     "type": "text",
-    "label": "Downloads, media, history, easels, spaces and boosts in one panel. Open it with Alt+Shift+B, or from the button beside the workspace indicator.",
+    "label": "Downloads, media, history, easels, spaces and boosts in one panel. Open it with Alt+Shift+B, or from the Library button.",
     "size": "12px",
     "margin": "0 0 6px 0"
+  },
+
+  {
+    "type": "separator",
+    "label": "Toolbar button",
+    "margin": "20px 0 10px 0"
+  },
+  {
+    "type": "checkbox",
+    "property": "zen.library.button.show",
+    "label": "Show the Library button in the toolbar",
+    "defaultValue": true
+  },
+  {
+    "type": "text",
+    "label": "The button is an ordinary toolbar widget: right-click the toolbar and choose Customize Toolbar to drag it anywhere, and it stays where you put it. Untick the box above to hide it, or tick it again to put it back beside the workspace indicator.",
+    "size": "12px",
+    "margin": "0 0 8px 0"
   },
 
   {

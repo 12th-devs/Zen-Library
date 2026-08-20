@@ -161,7 +161,6 @@
     if (!customElements.get('zen-library-item')) {
         try {
             customElements.define('zen-library-item', ZenLibraryItem);
-            console.log("ZenLibrary: zen-library-item custom element registered successfully");
         } catch (e) {
             console.error("ZenLibrary: Failed to register zen-library-item custom element:", e);
         }
@@ -266,16 +265,22 @@
         }
 
         connectedCallback() {
-            console.log("[ZenLibrary] ZenLibraryElement connectedCallback called");
             try {
                 if (!this._initialized) {
-                    console.log("[ZenLibrary] Initializing ZenLibraryElement");
                     const link = document.createElement("link");
                     link.rel = "stylesheet";
                     link.href = _ucScriptPath.replace(/\.uc\.js(\?.*)?$/i, ".css");
                     this.shadowRoot.appendChild(link);
 
-                    const updateColors = () => {
+                    // [audit] LEAK-3 — this used to be an anonymous closure handed to the
+                    // deprecated MediaQueryList.addListener() and never taken off again. A
+                    // fresh <zen-library> is built on every open() and dropped on close(),
+                    // but Gecko keeps a MediaQueryList that has listeners alive off the
+                    // document, and the closure captures `this` — so every open pinned a
+                    // whole detached panel, shadow root, rendered lists and blob-backed
+                    // thumbnails included. Kept on the instance so disconnectedCallback can
+                    // undo it, and on the modern addEventListener API.
+                    this._updateColors = () => {
                         const rootStyle = window.getComputedStyle(document.documentElement);
                         const hoverBg = rootStyle.getPropertyValue("--zen-hover-background") ||
                             rootStyle.getPropertyValue("--tab-hover-background-color");
@@ -283,8 +288,8 @@
                             this.style.setProperty("--zen-library-hover-bg", hoverBg);
                         }
                     };
-                    updateColors();
-                    window.matchMedia("(prefers-color-scheme: dark)").addListener(updateColors);
+                    this._updateColors();
+                    this._colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
                     const container = document.createElement("div");
                     container.className = "zen-library-container";
@@ -616,16 +621,27 @@
                     this.shadowRoot.appendChild(container);
 
                     this._initialized = true;
-                    console.log("[ZenLibrary] ZenLibraryElement initialization complete");
+                }
+                // Outside the _initialized guard so a re-connect re-arms it after
+                // disconnectedCallback took it off. Re-adding the same function reference
+                // is a no-op, so running this on every connect is safe.
+                if (this._colorSchemeQuery) {
+                    this._colorSchemeQuery.addEventListener("change", this._updateColors);
                 }
                 this.setAttribute("active-tab", this.activeTab);
-                console.log("[ZenLibrary] About to call update(), activeTab:", this.activeTab);
                 this.update();
                 this.getBoundingClientRect();
                 requestAnimationFrame(() => requestAnimationFrame(() => this.style.width = ""));
-                console.log("[ZenLibrary] ZenLibraryElement connectedCallback finished");
             } catch (e) {
                 console.error("ZenLibrary Error in connectedCallback:", e);
+            }
+        }
+
+        // See LEAK-3 above. close() and destroy() both take this element out of the DOM,
+        // which is the only signal that the panel it holds is finished with.
+        disconnectedCallback() {
+            if (this._colorSchemeQuery && this._updateColors) {
+                this._colorSchemeQuery.removeEventListener("change", this._updateColors);
             }
         }
 
@@ -867,7 +883,6 @@
     if (!customElements.get("zen-library")) {
         try {
             customElements.define("zen-library", ZenLibraryElement);
-            console.log("ZenLibrary: zen-library custom element registered successfully");
         } catch (e) {
             console.error("ZenLibrary: Failed to register zen-library custom element:", e);
         }
@@ -885,9 +900,9 @@
             this._onMozSwipeGesture = this._onMozSwipeGesture.bind(this);
             this._wheelGesture = { totalX: 0, lastTime: 0, mode: null };
             this._mozSwipeGesture = { active: false, mode: null };
-            this._sidebarObserver = null;
-            this._sidebarButtonTimer = null;
             this._initTimer = null;
+            this._buttonListener = null;
+            this._buttonPrefObserver = null;
 
             // Initialize Store
             this.store = new ZenStore({
@@ -915,6 +930,17 @@
             }
         }
         _init() {
+            try {
+                this._initInner();
+            } catch (e) {
+                // This runs while Zen is bringing the window up, and the constructor's
+                // return value is what becomes window.gZenLibrary. Anything allowed to
+                // escape here takes the entire mod down with it.
+                console.error("[ZenLibrary] init failed:", e);
+            }
+        }
+
+        _initInner() {
             window.addEventListener("keydown", this._onKeyDown, true);
             window.addEventListener("wheel", this._onWheel, { capture: true, passive: false });
             [
@@ -933,12 +959,14 @@
                 const s = document.createElement("style"); s.id = "zen-library-global-style"; document.head.appendChild(s);
             }
 
-            // Create toolbar button and initialize modules after browser is ready
+            // CustomizableUI is not ready at script-load time on a cold start — the same
+            // constraint zen-easel's host documents. Registering the widget inline throws
+            // out of the constructor, which leaves window.gZenLibrary unassigned and the
+            // button (and everything else that goes through it) dead.
             this._initTimer = setTimeout(() => {
                 this._initTimer = null;
                 this._initModules();
                 this._createToolbarButton();
-                this._createSidebarButton();
             }, 2000);
         }
 
@@ -985,111 +1013,168 @@
         }
 
         /**
-         * Create the toolbar button for toggling Zen Library
+         * Register the Library button as a real CustomizableUI widget.
+         *
+         * This used to be two buttons: a widget that landed in the customization
+         * palette, plus a second node hard-pinned after #zen-workspaces-button and
+         * kept there by a MutationObserver. The observer is what made the button
+         * "snap back" whenever someone dragged it somewhere else in Zen's toolbar
+         * editor — customize mode moved the node, the observer put it back.
+         *
+         * Zen registers #zen-sidebar-foot-buttons and #zen-sidebar-top-buttons as
+         * genuine CustomizableUI areas (see ZenCustomizableUI.startup), so a single
+         * ordinary widget can default to the workspace-indicator row and still be
+         * dragged anywhere — sidebar, nav-bar, palette — with CustomizableUI storing
+         * the placement across restarts.
          */
         _createToolbarButton() {
-            console.log("[ZenLibrary] Creating toggle button for customizable UI");
-            
+            const id = "zen-library-button";
+
+            // Fall back to the nav-bar if a Zen build ever stops registering the
+            // sidebar area, so the button still has somewhere valid to land.
+            const defaultArea = CustomizableUI.getAreaType("zen-sidebar-foot-buttons")
+                ? "zen-sidebar-foot-buttons"
+                : CustomizableUI.AREA_NAVBAR;
+
+            // Every window runs this, and Sine may re-run the script in a window where
+            // the widget is already registered. The widget is application-wide;
+            // CustomizableUI builds a node for each window on its own. Only createWidget
+            // is skipped — _watchButtonVisibility below still has to run, because what it
+            // registers is per-controller and has to die with this window.
+            const alreadyRegistered =
+                CustomizableUI.getWidget(id)?.provider === CustomizableUI.PROVIDER_API;
+
+            if (!alreadyRegistered && !this._registerButtonWidget(id, defaultArea)) return;
+
+            this._watchButtonVisibility(id, defaultArea);
+        }
+
+        // Split out from _createToolbarButton so the two things it does — registering the
+        // application-wide widget once, and wiring up this window's placement tracking —
+        // do not have to share a control flow. Returns false if the widget could not be
+        // registered, in which case there is nothing to track.
+        _registerButtonWidget(id, defaultArea) {
             try {
                 CustomizableUI.createWidget({
-                    id: "zen-library-button",
-                    type: "toolbarbutton",
+                    id,
+                    type: "button",
+                    // Without this CustomizableUI treats label/tooltiptext as Fluent ids.
+                    localized: false,
+                    // "Zen Library", not "Library": Firefox's own #library-button is
+                    // already labelled Library, and in the toolbar editor the two sit in
+                    // the same grid with no other way to tell them apart.
                     label: "Zen Library",
-                    tooltiptext: "Zen Library",
+                    tooltiptext: "Zen Library (Alt+Shift+B)",
+                    removable: true,
+                    defaultArea,
+                    // Wired here rather than through createWidget's `onCommand`, which
+                    // runs inside a try/catch whose logger is off by default — anything
+                    // that throws in there fails silently. `node.ownerGlobal` also gives
+                    // the window this instance of the button belongs to, so the one
+                    // app-wide widget drives whichever window was actually clicked
+                    // instead of pinning the controller that registered it.
+                    //
+                    // No `zen-sidebar-action-button` class: #downloads-button, the button
+                    // this one sits beside, does not carry it either, and the toolbar's
+                    // mode="icons" already hides the label.
                     onCreated: (node) => {
-                        if (node) {
-                            node.addEventListener("click", (ev) => {
-                                console.log("[ZenLibrary] Button clicked");
-                                if (window.gZenLibrary) {
-                                    window.gZenLibrary.toggle();
-                                }
-                            });
-                        }
-                    }
-                });
-                
-                console.log("ZenLibrary: Toggle button created successfully");
-            } catch (e) {
-                console.error("[ZenLibrary] Failed to create widget:", e);
-                // Fallback: try to find and add click handler to existing button
-                setTimeout(() => {
-                    const button = document.getElementById("zen-library-button");
-                    if (button) {
-                        button.addEventListener("click", () => {
-                            if (window.gZenLibrary) {
-                                window.gZenLibrary.toggle();
+                        node.addEventListener("command", (event) => {
+                            // node.ownerGlobal comes back undefined for this node here —
+                            // that, not a missing command event, is what made the button
+                            // dead on click, and createWidget's own onCommand callback
+                            // swallowed the same TypeError into a logger that is off by
+                            // default. So the window is resolved by falling back rather
+                            // than trusted from any single accessor. The last resort is
+                            // the focused browser window, which for a click on a toolbar
+                            // button is the right answer anyway.
+                            const win =
+                                node.ownerGlobal ||
+                                (node.ownerDocument && node.ownerDocument.defaultView) ||
+                                (event && event.view) ||
+                                (event && event.target && event.target.ownerGlobal) ||
+                                Services.wm.getMostRecentWindow("navigator:browser");
+
+                            const library = win && win.gZenLibrary;
+                            if (library) {
+                                library.toggle();
+                            } else {
+                                console.error("[ZenLibrary] Button clicked, but gZenLibrary is missing on", win);
                             }
                         });
-                        console.log("[ZenLibrary] Added fallback click handler");
                     }
-                }, 1000);
+                });
+                return true;
+            } catch (e) {
+                console.error("[ZenLibrary] Failed to create toolbar widget:", e);
+                return false;
             }
         }
 
         /**
-         * A button in Zen's own sidebar, immediately after the workspace indicator.
+         * Keeps the button's placement and the mod's "show the button" checkbox saying the
+         * same thing, in both directions.
          *
-         * Not a CustomizableUI widget: that route lands the button in the customization
-         * palette and leaves it to the user to drag somewhere, which cannot express
-         * "right next to the workspace indicator". Zen's own indicator is a plain node in
-         * #zen-sidebar-foot-buttons with removable="false", so this follows suit and sits
-         * beside it. The CustomizableUI widget above stays as well — this is additive.
+         * Dragging the button out in customize mode leaves it in the palette, and nothing
+         * in Zen's UI names it well enough to find again — so removing it could strand it
+         * with no way back. The checkbox in the mod's settings is that way back.
+         *
+         *   - remove or restore it in customize mode → the checkbox follows;
+         *   - tick or untick the checkbox           → the placement follows.
+         *
+         * This also covers the upgrade case. `defaultArea` in createWidget only applies to
+         * a widget id CustomizableUI has never seen, and anyone coming from the version
+         * with two buttons has already seen "zen-library-button" sitting in the palette.
+         * The startup reconciliation at the bottom is what puts it in the sidebar for them.
+         *
+         * Registered per window rather than once for the application, because both objects
+         * belong to this window's global: leaving them behind when the window closes pins
+         * the whole dead window in memory, and there is no other window that would take
+         * ownership afterwards. Every path below is idempotent, so N windows registering N
+         * copies converges to the same result as one — setBoolPref does not notify when the
+         * value is unchanged, and both reconciling paths bail when placement and pref
+         * already agree.
          */
-        _createSidebarButton() {
-            const install = () => {
-                const anchor = document.getElementById("zen-workspaces-button");
-                if (!anchor || !anchor.parentElement) return false;
-                if (document.getElementById("zen-library-sidebar-button")) return true;
+        _watchButtonVisibility(id, defaultArea) {
+            const PREF = "zen.library.button.show";
+            const isPlaced = () => !!CustomizableUI.getPlacementOfWidget(id);
 
-                const btn = document.createXULElement("toolbarbutton");
-                btn.id = "zen-library-sidebar-button";
-                btn.className = "chromeclass-toolbar-additional toolbarbutton-1 zen-sidebar-action-button";
-                // skipintoolbarset keeps customize mode from treating this as a widget it
-                // owns and relocating or removing it.
-                btn.setAttribute("removable", "false");
-                btn.setAttribute("skipintoolbarset", "true");
-                btn.setAttribute("label", "Library");
-                btn.setAttribute("tooltiptext", "Library (Alt+Shift+B)");
-                btn.addEventListener("command", () => {
-                    if (window.gZenLibrary) window.gZenLibrary.toggle();
-                });
+            try {
+                // destroyWidget fires only onWidgetDestroyed, never onWidgetRemoved, so a
+                // Sine rebuild does not read as the user hiding the button.
+                this._buttonListener = {
+                    onWidgetRemoved: (widgetId) => {
+                        if (widgetId === id) Services.prefs.setBoolPref(PREF, false);
+                    },
+                    onWidgetAdded: (widgetId) => {
+                        if (widgetId === id) Services.prefs.setBoolPref(PREF, true);
+                    }
+                };
+                CustomizableUI.addListener(this._buttonListener);
 
-                anchor.after(btn);
-                return true;
-            };
+                this._buttonPrefObserver = {
+                    observe: () => {
+                        const show = Services.prefs.getBoolPref(PREF, true);
+                        // Already agrees with reality — this is the echo of our own
+                        // change coming back round, and acting on it would loop.
+                        if (show === isPlaced()) return;
+                        if (show) {
+                            CustomizableUI.addWidgetToArea(id, defaultArea);
+                        } else {
+                            CustomizableUI.removeWidgetFromArea(id);
+                        }
+                    }
+                };
+                Services.prefs.addObserver(PREF, this._buttonPrefObserver);
 
-            if (install()) {
-                this._watchSidebarButton();
-                return;
-            }
-
-            // The toolbar exists in browser.xhtml markup, but ZenCustomizableUI rebuilds
-            // the sidebar during startup, so the anchor may not be in place yet.
-            let attempts = 0;
-            const timer = setInterval(() => {
-                if (install() || ++attempts > 40) {
-                    clearInterval(timer);
-                    if (attempts <= 40) this._watchSidebarButton();
+                // Deliberately one-way: if the checkbox says the button should be there
+                // and it is not, put it back. The reverse is left alone, so a stale pref
+                // can never take away a button the user has placed by hand.
+                if (Services.prefs.getBoolPref(PREF, true) && !isPlaced()) {
+                    CustomizableUI.addWidgetToArea(id, defaultArea);
                 }
-            }, 250);
-            this._sidebarButtonTimer = timer;
-        }
-
-        // Zen reshuffles the sidebar on workspace changes and when entering or leaving
-        // customize mode, either of which can drop the node. Watching for that is
-        // cheaper than trying to predict every case.
-        _watchSidebarButton() {
-            const toolbar = document.getElementById("zen-sidebar-foot-buttons");
-            if (!toolbar || this._sidebarObserver) return;
-
-            this._sidebarObserver = new MutationObserver(() => {
-                if (document.getElementById("zen-library-sidebar-button")) return;
-                const anchor = document.getElementById("zen-workspaces-button");
-                const btn = this._detachedSidebarButton;
-                if (anchor && btn) anchor.after(btn);
-            });
-            this._sidebarObserver.observe(toolbar, { childList: true });
-            this._detachedSidebarButton = document.getElementById("zen-library-sidebar-button");
+            } catch (e) {
+                console.error("[ZenLibrary] Failed to track toolbar button visibility:", e);
+            }
         }
 
         /**
@@ -1116,6 +1201,32 @@
             // the Easels rename prompt being the case that surfaced it — and it also
             // overrides anything that has already decided what the key means.
             if (e.defaultPrevented) return;
+
+            const isMac = Services.appinfo.OS === "Darwin";
+
+            // Support Alt + Shift + B (Direct fallback/Windows default)
+            // AND Cmd + Alt + B (Common macOS alternative)
+            const isToggle = e.code === "KeyB" && (
+                (e.altKey && e.shiftKey) ||
+                (isMac && e.metaKey && e.altKey) ||
+                (isMac && e.metaKey && e.shiftKey)
+            );
+
+            // [audit] COMPAT-2 — checked before the target guards below, not after. Those
+            // guards exist for Ctrl+H and Ctrl+J, which are Firefox's own shortcuts and are
+            // widely bound by web apps; this chord is the mod's own and is neither
+            // text-producing nor plausibly wanted by a page. Sitting below the guards, it
+            // was unreachable in the one case that matters most: with focus inside a web
+            // page the event's target in this window is the <browser> element, so
+            // `name === "browser" && !this._isOpen` returned first and the shortcut did
+            // nothing unless focus happened to be in chrome UI.
+            if (isToggle) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggle();
+                return;
+            }
+
             const target = e.composedPath ? e.composedPath()[0] : e.target;
             const name = target && target.localName ? target.localName.toLowerCase() : "";
             if (name === "input" || name === "textarea" || (target && target.isContentEditable)) return;
@@ -1126,24 +1237,6 @@
             // app was swallowed here with no way to opt out. A page gets its keystrokes
             // unless the library itself is open and focused.
             if (name === "browser" && !this._isOpen) return;
-
-            const isMac = Services.appinfo.OS === "Darwin";
-            const toggleKey = e.code === "KeyB";
-
-            // Support Alt + Shift + B (Direct fallback/Windows default)
-            // AND Cmd + Alt + B (Common macOS alternative)
-            const isToggle = toggleKey && (
-                (e.altKey && e.shiftKey) ||
-                (isMac && e.metaKey && e.altKey) ||
-                (isMac && e.metaKey && e.shiftKey)
-            );
-
-            if (isToggle) {
-                e.preventDefault();
-                e.stopPropagation();
-                this.toggle();
-                return;
-            }
 
             // [audit] COMPAT-1 — Ctrl+H and Ctrl+J are Firefox's own Library and Downloads
             // shortcuts and are also bound by plenty of web apps. Taking them over is a
@@ -1415,18 +1508,9 @@
             all[index].scrollIntoView({ block: "nearest" });
         }
         // [audit] LEAK-2 — this used to remove the keydown listener, call the modules'
-        // destroy() and drop the element, and stop there. Four things outlived it:
-        //
-        //   - the MutationObserver watching #zen-sidebar-foot-buttons, which is re-created
-        //     on every Sine rebuild and never disconnected, so they accumulated;
-        //   - the 250ms setInterval hunting for the sidebar anchor;
-        //   - the sidebar button node itself;
-        //   - the CustomizableUI widget, whose onCreated closure pins the *old* controller.
-        //
-        // `widget` follows the same rule zen-easel's host uses: the CustomizableUI widget is
-        // registered once for the whole application, so tearing it down because one window
-        // closed would take the button away from every other window still open. Only the
-        // rebuild path destroys it.
+        // destroy() and drop the element, and stop there, leaking the init timer and the
+        // CustomizableUI widget on every Sine rebuild. `widget` is false on the window-close
+        // path and true on the Sine rebuild path; see the teardown below for why.
         destroy({ widget = true } = {}) {
             window.removeEventListener("keydown", this._onKeyDown, true);
             window.removeEventListener("unload", this._onUnload);
@@ -1439,14 +1523,6 @@
                 "MozSwipeGestureEnd"
             ].forEach((type) => window.removeEventListener(type, this._onMozSwipeGesture, true));
 
-            if (this._sidebarObserver) {
-                try { this._sidebarObserver.disconnect(); } catch (e) { }
-                this._sidebarObserver = null;
-            }
-            if (this._sidebarButtonTimer) {
-                clearInterval(this._sidebarButtonTimer);
-                this._sidebarButtonTimer = null;
-            }
             if (this._initTimer) {
                 clearTimeout(this._initTimer);
                 this._initTimer = null;
@@ -1460,10 +1536,21 @@
                 }
             }
 
-            const sidebarButton = document.getElementById("zen-library-sidebar-button");
-            if (sidebarButton) sidebarButton.remove();
-            this._detachedSidebarButton = null;
+            // Unconditional: the listener and the pref observer are this window's objects,
+            // registered on application-wide services. Leaving them there when the window
+            // closes keeps the window's whole global reachable from CustomizableUI and the
+            // pref service — and no surviving window would ever take over from them.
+            if (this._buttonListener) {
+                try { CustomizableUI.removeListener(this._buttonListener); } catch (e) { }
+                this._buttonListener = null;
+            }
+            if (this._buttonPrefObserver) {
+                try { Services.prefs.removeObserver("zen.library.button.show", this._buttonPrefObserver); } catch (e) { }
+                this._buttonPrefObserver = null;
+            }
 
+            // The widget itself really is application-wide, so tearing it down because one
+            // window closed would take the button away from every window still open.
             if (widget) {
                 try { CustomizableUI.destroyWidget("zen-library-button"); } catch (e) { }
             }
@@ -1476,41 +1563,32 @@
             document.documentElement.style.removeProperty("--zen-library-offset");
         }
         toggle() {
-            console.log("[ZenLibrary] Toggle called, _isOpen:", this._isOpen, "_isTransitioning:", this._isTransitioning);
             const now = Date.now();
             if (now - this._lastToggleTime < 40) {
-                console.log("[ZenLibrary] Toggle blocked - too soon since last toggle");
                 return;
             }
             this._lastToggleTime = now;
             if (this._isTransitioning) {
-                console.log("[ZenLibrary] Toggle blocked - currently transitioning");
                 return;
             }
             if (this._isOpen && !document.querySelector("zen-library")) {
-                console.log("[ZenLibrary] Resetting _isOpen state - element not found");
                 this._isOpen = false;
             }
-            console.log("[ZenLibrary] Calling", this._isOpen ? "close()" : "open()");
             this._isOpen ? this.close() : this.open();
         }
         
         /**
          * Open the library with a specific tab selected, or close if already on that tab
-         * @param {string} tabName - The tab to open ("downloads", "history", "media", "spaces")
+         * @param {string} tabName - One of the ids in the check below
          */
         openTab(tabName) {
-            console.log("[ZenLibrary] openTab called with:", tabName);
-            
             // Validate tab name
             if (!tabName || !["downloads", "history", "media", "easels", "spaces", "boosts"].includes(tabName)) {
-                console.log("[ZenLibrary] Invalid tab name:", tabName);
                 return;
             }
             
             // If already open on the same tab, close the library
             if (this._isOpen && this._element && this._element.activeTab === tabName) {
-                console.log("[ZenLibrary] Already open on tab:", tabName, "- closing");
                 this.close();
                 return;
             }
@@ -1520,28 +1598,22 @@
             
             // If already open but on a different tab, switch to the requested tab
             if (this._isOpen && this._element) {
-                console.log("[ZenLibrary] Already open, switching to tab:", tabName);
                 this._element.activeTab = tabName;
                 return;
             }
             
             // Otherwise, open the library (it will use lastActiveTab)
-            console.log("[ZenLibrary] Opening library with tab:", tabName);
             this.open();
         }
         open() {
-            console.log("[ZenLibrary] Open called, _isOpen:", this._isOpen, "_isTransitioning:", this._isTransitioning);
             if (this._isOpen || this._isTransitioning) {
-                console.log("[ZenLibrary] Open blocked - already open or transitioning");
                 return;
             }
             const b = document.getElementById("browser");
             if (!b) {
-                console.log("[ZenLibrary] Open blocked - browser element not found");
                 return;
             }
 
-            console.log("[ZenLibrary] Opening library...");
             this._isTransitioning = true;
             this._isOpen = true;
 
@@ -1555,8 +1627,6 @@
             } catch (e) { }
 
             this._element = document.createElement("zen-library");
-            console.log("[ZenLibrary] Created element:", this._element);
-            console.log("[ZenLibrary] Element constructor:", this._element.constructor.name);
             this._element.id = "zen-library-container";
             if (isRightSide) this._element.setAttribute("right-side", "true");
             this._element.style.zIndex = "1";
@@ -1588,8 +1658,6 @@
             if (isRightSide) b.append(this._element);
             else b.prepend(this._element);
             
-            console.log("[ZenLibrary] Element appended to browser, parent:", this._element.parentNode);
-            console.log("[ZenLibrary] Element in DOM:", document.contains(this._element));
 
             if (!isCompactHidden) {
                 document.documentElement.setAttribute("zen-library-open", "true");
@@ -1597,17 +1665,9 @@
                 document.documentElement.setAttribute("zen-library-open-compact", "true");
             }
 
-            requestAnimationFrame(() => requestAnimationFrame(() => {
-                if (this._element) {
-                    console.log("[ZenLibrary] Calling element.update()");
-                    this._element.update();
-                } else {
-                    console.log("[ZenLibrary] Element not found for update");
-                }
-            }));
+            requestAnimationFrame(() => requestAnimationFrame(() => this._element?.update()));
 
             setTimeout(() => { 
-                console.log("[ZenLibrary] Resetting _isTransitioning to false");
                 this._isTransitioning = false; 
             }, 60);
         }
