@@ -63,6 +63,17 @@
             }
         }
 
+        // refresh() reloads the list; this puts the reloaded list back on screen. Guarded
+        // because the cached list outlives the panel in _modules — a mutation can land
+        // after the library has been closed, and re-rendering then would redraw a detached
+        // element for nothing.
+        async _reload() {
+            await this.refresh();
+            if (window.gZenLibrary?._isOpen && this.library.activeTab === "easels") {
+                this.library.update(true);
+            }
+        }
+
         render() {
             const grid = this.el("div", { className: "easel-card-grid" });
 
@@ -244,12 +255,9 @@
             }
 
             // close() declines while a transition is already running, so the section can
-            // still be on screen here. Refresh either way — the cached list is stale the
-            // moment a board is added, and it outlives the panel in _modules.
-            await this.refresh();
-            if (window.gZenLibrary?._isOpen && this.library.activeTab === "easels") {
-                this.library.update(true);
-            }
+            // still be on screen here. Reload either way — the cached list is stale the
+            // moment a board is added.
+            await this._reload();
         }
 
         _host() {
@@ -260,56 +268,94 @@
             return host || null;
         }
 
+        // [audit] UI — this menu used to be a plain <div> parented into the library's own
+        // shadow root. That made it a child of the sidebar panel: it was clipped at the
+        // panel's edge, and it painted over the panel's translucent background instead of
+        // an opaque surface of its own. It is now the same construction the History
+        // section uses — a real XUL menupopup in mainPopupSet, opened at screen
+        // coordinates — so the platform owns its styling, its backdrop and its
+        // dismiss-on-outside-click, and it can overflow the sidebar.
+        _ensureContextMenu() {
+            if (document.getElementById("zen-easels-context-menu")) return;
+            const popup = document.createXULElement("menupopup");
+            popup.id = "zen-easels-context-menu";
+
+            const openItem = document.createXULElement("menuitem");
+            openItem.id = "zen-easels-ctx-open";
+            openItem.setAttribute("label", "Open");
+
+            const renameItem = document.createXULElement("menuitem");
+            renameItem.id = "zen-easels-ctx-rename";
+            renameItem.setAttribute("label", "Rename…");
+
+            const deleteItem = document.createXULElement("menuitem");
+            deleteItem.id = "zen-easels-ctx-delete";
+            deleteItem.setAttribute("label", "Delete");
+
+            popup.appendChild(openItem);
+            popup.appendChild(renameItem);
+            popup.appendChild(document.createXULElement("menuseparator"));
+            popup.appendChild(deleteItem);
+            (document.getElementById("mainPopupSet") || document.body).appendChild(popup);
+        }
+
         _contextMenu(e, entry) {
             e.preventDefault();
             const store = this._store();
             if (!store) return;
 
-            const menu = this.el("div", { className: "easel-card-menu" });
-            const item = (label, handler, danger = false) => this.el("button", {
-                className: `easel-card-menu-item${danger ? " is-danger" : ""}`,
-                type: "button",
-                textContent: label,
-                onclick: async () => {
-                    close();
+            this._ensureContextMenu();
+            const popup = document.getElementById("zen-easels-context-menu");
+
+            // One popup is shared by every card, so the previous card's handlers have to go
+            // before this card's are attached. Cloning each item over itself drops them with
+            // the old node.
+            for (const id of ["zen-easels-ctx-open", "zen-easels-ctx-rename", "zen-easels-ctx-delete"]) {
+                const el = document.getElementById(id);
+                if (el) el.replaceWith(el.cloneNode(true));
+            }
+
+            const on = (id, handler) => {
+                document.getElementById(id).addEventListener("command", async () => {
                     try { await handler(); } catch (err) { console.error("[ZenLibrary]", err); }
-                }
+                });
+            };
+
+            on("zen-easels-ctx-open", () => this._openEasel(entry.id));
+
+            on("zen-easels-ctx-rename", async () => {
+                const current = entry.title || "Untitled Easel";
+                const value = { value: current };
+                const ok = Services.prompt.prompt(window, "Rename easel", "New name:", value, null, { value: false });
+                const title = ok ? value.value.trim() : "";
+                // A name that came back unchanged is not worth an index write and a full
+                // re-render of the grid.
+                if (!title || title === current) return;
+                await store.renameEasel(entry.id, title);
+                await this._reload();
             });
 
-            const close = () => {
-                menu.remove();
-                this.library.shadowRoot.removeEventListener("pointerdown", onOutside, true);
-            };
-            const onOutside = ev => { if (!menu.contains(ev.target)) close(); };
+            on("zen-easels-ctx-delete", async () => {
+                const confirmed = Services.prompt.confirm(
+                    window, "Delete easel",
+                    `Delete "${entry.title || "Untitled Easel"}" and everything on it? This cannot be undone.`
+                );
+                if (!confirmed) return;
+                await store.removeEasel(entry.id);
 
-            menu.append(
-                item("Open", () => this._openEasel(entry.id)),
-                item("Rename…", async () => {
-                    const value = { value: entry.title || "Untitled Easel" };
-                    const ok = Services.prompt.prompt(window, "Rename easel", "New name:", value, null, { value: false });
-                    if (!ok || !value.value.trim()) return;
-                    await store.renameEasel(entry.id, value.value.trim());
-                    await this.refresh();
-                    this.library.update(true);
-                }),
-                item("Delete", async () => {
-                    const confirmed = Services.prompt.confirm(
-                        window, "Delete easel",
-                        `Delete "${entry.title || "Untitled Easel"}" and everything on it? This cannot be undone.`
-                    );
-                    if (!confirmed) return;
-                    await store.removeEasel(entry.id);
-                    await this.refresh();
-                    this.library.update(true);
-                }, true)
-            );
+                // See LEAK-1 in _applyThumbnail: the cache is keyed by easel id, and a
+                // deleted board has no later updatedAt to invalidate its entry, so the
+                // blob: URL would sit in the map until the window closed.
+                const cached = this._thumbUrls.get(entry.id);
+                if (cached) {
+                    try { URL.revokeObjectURL(cached.url); } catch (e) { }
+                    this._thumbUrls.delete(entry.id);
+                }
 
-            const host = this.library.shadowRoot.querySelector(".library-content") || this.library.shadowRoot;
-            const bounds = host.getBoundingClientRect();
-            menu.style.left = `${e.clientX - bounds.left}px`;
-            menu.style.top = `${e.clientY - bounds.top}px`;
-            host.appendChild(menu);
-            this.library.shadowRoot.addEventListener("pointerdown", onOutside, true);
+                await this._reload();
+            });
+
+            popup.openPopupAtScreen(e.screenX, e.screenY, true);
         }
 
         resetView() {
@@ -317,6 +363,10 @@
         }
 
         destroy() {
+            // The popup lives in mainPopupSet, outside anything the library tears down
+            // itself, so it has to be removed by hand or a reload leaves one behind.
+            document.getElementById("zen-easels-context-menu")?.remove();
+
             // Entries are { url, stamp } now, not bare strings. See _applyThumbnail.
             for (const { url } of this._thumbUrls.values()) {
                 try { URL.revokeObjectURL(url); } catch (e) { }

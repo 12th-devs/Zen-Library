@@ -113,41 +113,6 @@
   opacity: 0.85;
 }
 
-/* ------------------------------------------------------------- context menu */
-
-.easel-card-menu {
-  position: absolute;
-  z-index: 10;
-  min-width: 150px;
-  padding: 4px;
-  border-radius: var(--border-radius-medium, 8px);
-  border: 1px solid var(--zen-border-color, rgba(128, 128, 128, 0.3));
-  background: var(--zen-toolbar-element-bg, Field);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-}
-
-.easel-card-menu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.easel-card-menu-item:hover {
-  background: var(--zen-library-hover-bg, rgba(128, 128, 128, 0.16));
-}
-
-.easel-card-menu-item.is-danger {
-  color: #e2564a;
-}
-
 /* ------------------------------------------------------- sidebar + empty icon */
 
 .easels-icon {
