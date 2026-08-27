@@ -86,6 +86,20 @@
                 return grid;
             }
 
+            // First child of the two-column grid, so it sits at the top of the left
+            // column rather than trailing the last board where it used to sit.
+            grid.appendChild(this.el("button", {
+                className: "easel-card easel-card-new",
+                type: "button",
+                title: "New easel",
+                // [audit] This was _openEasel(null), which means "open whichever easel is
+                // already open" — so with an easel tab up the button just focused it and
+                // nothing appeared to happen. It creates a board now.
+                onclick: () => this._newEasel()
+            }, [
+                this.el("div", { className: "easel-card-plus" })
+            ]));
+
             const term = (this._searchTerm || "").trim().toLowerCase();
             const visible = term
                 ? this._easels.filter(e => (e.title || "").toLowerCase().includes(term))
@@ -99,19 +113,6 @@
             } else {
                 for (const entry of visible) grid.appendChild(this._card(entry));
             }
-
-            grid.appendChild(this.el("button", {
-                className: "easel-card easel-card-new",
-                type: "button",
-                title: "New easel",
-                // [audit] This was _openEasel(null), which means "open whichever easel is
-                // already open" — so with an easel tab up the button just focused it and
-                // nothing appeared to happen. It creates a board now.
-                onclick: () => this._newEasel()
-            }, [
-                this.el("div", { className: "easel-card-plus", textContent: "+" }),
-                this.el("div", { className: "easel-card-title", textContent: "New easel" })
-            ]));
 
             this._scheduleRerender();
             return grid;
@@ -158,14 +159,16 @@
                 onclick: () => this._openEasel(entry.id)
             }, [
                 thumb,
-                this.el("div", { className: "easel-card-title", textContent: entry.title || "Untitled Easel" }),
-                this.el("div", {
-                    className: "easel-card-meta",
-                    textContent: [
-                        formatWhen(entry.updatedAt),
-                        entry.objectCount ? `${entry.objectCount} item${entry.objectCount === 1 ? "" : "s"}` : ""
-                    ].filter(Boolean).join(" · ")
-                })
+                this.el("div", { className: "easel-card-info" }, [
+                    this.el("div", { className: "easel-card-title", textContent: entry.title || "Untitled Easel" }),
+                    this.el("div", {
+                        className: "easel-card-meta",
+                        textContent: [
+                            formatWhen(entry.updatedAt),
+                            entry.objectCount ? `${entry.objectCount} item${entry.objectCount === 1 ? "" : "s"}` : ""
+                        ].filter(Boolean).join(" · ")
+                    })
+                ])
             ]);
         }
 

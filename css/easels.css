@@ -16,12 +16,14 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* Two columns on purpose. The easels tab widens the library to 440px so each
+     tile has ~160px; minmax(0, 1fr) lets them shrink instead of overflowing. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   /* Rows keep their natural height rather than stretching to fill the box now that
      the grid is as tall as the panel. */
   align-content: start;
-  gap: 10px;
-  padding: 4px 2px 12px 2px;
+  gap: 18px;
+  padding: 16px 18px 12px 18px;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -30,32 +32,45 @@
 }
 
 /* Easels appends its empty state into the grid itself rather than beside it, so it has
-   to span every column — otherwise it renders as one 140px cell in column 1. It stays in
-   the normal row flow on purpose: the "New easel" card is appended after it, and a
-   full-height empty state would push that card below the fold. */
+   to span every column — otherwise it renders as one cell in column 1, next to the
+   "New easel" card. It stays in the normal row flow so it does not stretch the first
+   row to the full panel height. */
 .easel-card-grid > .empty-state {
   grid-column: 1 / -1;
 }
 
 .easel-card {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid transparent;
+  padding: 0;
+  border: none;
   border-radius: var(--border-radius-medium, 8px);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s var(--zen-library-easing, ease),
-              border-color 0.12s var(--zen-library-easing, ease);
 }
 
-.easel-card:hover {
-  background: var(--zen-library-hover-bg, var(--tab-hover-background-color, rgba(128, 128, 128, 0.14)));
-  border-color: var(--zen-border-color, transparent);
+.easel-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background 0.2s ease;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.easel-card:hover::after {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.easel-card-new:hover::after {
+  background: transparent;
 }
 
 .easel-card:focus-visible {
@@ -63,10 +78,16 @@
   outline-offset: 1px;
 }
 
+/* Firefox buttons carry an anonymous inner padding box that shifts content down. */
+.easel-card::-moz-focus-inner {
+  border: 0;
+  padding: 0;
+}
+
 .easel-card-thumb {
-  aspect-ratio: 4 / 3;
-  border-radius: 6px;
-  border: 1px solid var(--zen-border-color, rgba(128, 128, 128, 0.25));
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
   background-color: var(--zen-toolbar-element-bg, rgba(128, 128, 128, 0.10));
   background-size: cover;
   background-position: top center;
@@ -79,9 +100,36 @@
   background-color: transparent;
 }
 
+/* Name and meta sit on the thumbnail and slide up on hover, matching .media-info. */
+.easel-card-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: light-dark(
+    color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
+    color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%)
+  );
+  color: inherit;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: transform 0.2s var(--zen-library-easing, ease),
+              opacity 0.2s var(--zen-library-easing, ease);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.easel-card:hover .easel-card-info {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .easel-card-title {
-  margin-top: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -89,28 +137,47 @@
 }
 
 .easel-card-meta {
-  font-size: 11px;
-  opacity: 0.6;
+  font-size: 10px;
+  opacity: 0.8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* The new-easel tile mirrors the card shape so the grid reads as one row of equals. */
+/* Same square tile as the boards so the two-column grid reads as one set of equals.
+   Render puts this card first, so it occupies the top of the left column. */
 .easel-card-new .easel-card-plus {
-  aspect-ratio: 4 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  border: 2px dashed color-mix(in srgb, currentColor 50%, transparent);
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+.easel-card-new .easel-card-plus::before {
+  content: "+";
+  font-size: 32px;
   font-weight: 300;
-  opacity: 0.5;
-  border-radius: 6px;
-  border: 1px dashed var(--zen-border-color, rgba(128, 128, 128, 0.4));
+  line-height: 1;
+  /* The plus glyph sits low in the em box; this is optical, not layout. */
+  translate: 0 -0.08em;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  transition: color 0.15s var(--zen-library-easing, ease);
 }
 
 .easel-card-new:hover .easel-card-plus {
-  opacity: 0.85;
+  border-color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+.easel-card-new:hover .easel-card-plus::before {
+  content: "New easel";
+  font-size: 13px;
+  font-weight: 600;
+  translate: 0;
+  color: color-mix(in srgb, currentColor 85%, transparent);
 }
 
 /* ------------------------------------------------------- sidebar + empty icon */

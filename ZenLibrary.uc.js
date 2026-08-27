@@ -691,6 +691,10 @@
                         const widthCalc = 340; // Default
                         targetWidth = widthCalc;
                     }
+                } else if (this.activeTab === "easels") {
+                    // Two ~160px tiles: 90 sidebar + 20 side padding + 8 gap + 320 cards.
+                    // The default 340px panel left each thumbnail around 110px wide.
+                    targetWidth = 440;
                 }
 
                 const startWidthStyle = this.style.getPropertyValue("--zen-library-start-width");
