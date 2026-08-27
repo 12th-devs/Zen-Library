@@ -937,72 +937,65 @@
 }
 
 /* --- Easels --- */
-/* Authored for this fork: upstream v2.1 has no Easels tab, so the board/legs/sheet
-   animation below follows the same 0.583s envelope and cubic-beziers as the Spaces
-   card bounce rather than inventing a second motion language. */
-.sidebar-button[data-id="easels"].active .zen-easels-board {
-  animation: zenEaselsBoard 0.583s forwards;
+/* 1. .zen-easels-outer-frame  — solid --zen-folder-stroke fill, no stroke
+   2. .zen-easels-inner-pane   — transparent, fills --zen-folder-front-bgcolor on active
+   3. .zen-easels-squiggle     — --zen-folder-stroke
+
+   Both rects sit inside .zen-easels-bounce and share one small bounce, so the pane
+   never drifts inside its cutout. The squiggle rides that and adds a heartbeat. */
+.sidebar-button[data-id="easels"].active .zen-easels-bounce {
+  animation: zenEaselsBounce 0.583s forwards;
 }
 
-.sidebar-button[data-id="easels"].active .zen-easels-legs {
-  animation: zenEaselsLegs 0.583s forwards;
-}
-
-.sidebar-button[data-id="easels"].active .zen-easels-sheet {
-  animation: zenEaselsSheet 0.583s forwards;
+.sidebar-button[data-id="easels"].active .zen-easels-squiggle {
+  animation: zenEaselsSquiggle 0.583s forwards;
 }
 
 /* --- Easels Keyframes --- */
-@keyframes zenEaselsBoard {
+/* Stops and cubics from zenMediaFrontBounce — dip flat, launch with a tilt, hold at
+   rest through the tail. The rotation is smaller than Media's 16.32deg because this
+   is one window rather than a card fanning away from a second one. */
+@keyframes zenEaselsBounce {
   0% {
     transform: translateY(0px) rotate(0deg);
-    animation-timing-function: cubic-bezier(0.21, 0, 0.56, 1);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
   }
-  31.43% { /* Dips into the legs */
-    transform: translateY(4px) rotate(-2.5deg);
-    animation-timing-function: cubic-bezier(0.38, 0, 0.55, 1);
+  24.41% { /* Dip */
+    transform: translateY(3px) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.64, 1);
   }
-  62.86% { /* Kicks up and tilts */
-    transform: translateY(-10px) rotate(4.5deg);
-    animation-timing-function: cubic-bezier(0.73, 0, 0.63, 1);
+  55.88% { /* Launch and tilt */
+    transform: translateY(-12px) rotate(6deg);
+    animation-timing-function: cubic-bezier(0.25, 0, 0.75, 1);
   }
-  100% {
+  88.24% {
     transform: translateY(0px) rotate(0deg);
-  }
-}
-
-@keyframes zenEaselsLegs {
-  0% {
-    transform: translateY(0px);
-    animation-timing-function: cubic-bezier(0.21, 0, 0.56, 1);
-  }
-  31.43% {
-    transform: translateY(2px);
-    animation-timing-function: cubic-bezier(0.38, 0, 0.55, 1);
-  }
-  62.86% {
-    transform: translateY(-2.5px);
-    animation-timing-function: cubic-bezier(0.73, 0, 0.63, 1);
-  }
-  100% {
-    transform: translateY(0px);
-  }
-}
-
-@keyframes zenEaselsSheet {
-  0%, 20% {
-    transform: scale(1);
-    animation-timing-function: cubic-bezier(0.29, 0, 0.83, 1);
-  }
-  40% { /* Squashes as the board dips */
-    transform: scale(0.72);
     animation-timing-function: linear;
   }
-  62.86% { /* Overshoots with the kick */
-    transform: scale(1.12);
-    animation-timing-function: cubic-bezier(0.45, 0, 0.63, 1);
+  100% {
+    transform: translateY(0px) rotate(0deg);
   }
-  85%, 100% {
-    transform: scale(1);
+}
+
+/* Heartbeat: two beats, the second softer. 0.82 is the rest scale from the markup. */
+@keyframes zenEaselsSquiggle {
+  0% {
+    transform: scale(0.82);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  22% { /* Beat one */
+    transform: scale(0.94);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  40% {
+    transform: scale(0.8);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  58% { /* Beat two */
+    transform: scale(0.9);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  80%, 100% {
+    transform: scale(0.82);
   }
 }

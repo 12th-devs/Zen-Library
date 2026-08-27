@@ -548,28 +548,42 @@
       <stop offset="0" style="stop-color: rgb(255, 255, 255)"/>
       <stop offset="1" style="stop-color: rgb(0, 0, 0)"/>
     </linearGradient>
+
+    <!-- Punches the inner pane out of the outer frame so the pane is genuinely
+         see-through when idle. The cutout carries the same class and origin as the
+         real pane below, so it tracks the pane's scale (same trick as Media/Spaces). -->
+    <mask id="zen-easels-mask">
+      <rect x="-10" y="-10" width="148" height="148" fill="white" />
+      <g class="zen-easels-inner-pane" style="transform-origin: 64px 71.28px;">
+        <rect x="16.16" y="36.04" width="95.68" height="70.48" rx="8" fill="black" />
+      </g>
+    </mask>
   </defs>
 
-  <!--Legs-->
-  <g class="zen-easels-legs" style="transform-origin: 64px 84px;">
-    <path class="zen-easels-border" d="M 42 84 L 30 118 M 86 84 L 98 118 M 38 106 L 90 106"
-          style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px; stroke-linecap: round;" />
-  </g>
+  <g class="zen-easels-bounce" style="transform-origin: 64px 64px;">
 
-  <!--Board-->
-  <g class="zen-easels-board" style="transform-origin: 64px 84px;">
-    <rect class="zen-easels-bg" x="19.55" y="13.55" width="88.9" height="70.9" rx="10.45"
-          style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-    <rect class="zen-easels-gradient" x="19.55" y="13.55" width="88.9" height="70.9" rx="10.45"
-          style="fill: url(#zen-easels-grad-front); fill-opacity: 0;" />
-    <rect class="zen-easels-border" x="19.55" y="13.55" width="88.9" height="70.9" rx="10.45"
-          style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
-
-    <!--Pinned sheet-->
-    <g class="zen-easels-sheet" style="transform-origin: 64px 49px;">
-      <rect class="zen-easels-border" x="38" y="32" width="52" height="34" rx="6"
-            style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
+    <!-- 1. OUTER FRAME — rect 1 of the source (200x183, rx 15). Solid stroke-token fill, no stroke. -->
+    <g class="zen-easels-outer-frame" mask="url(#zen-easels-mask)">
+      <rect class="zen-easels-frame-fill" x="8" y="12.76" width="112" height="102.48" rx="12"
+            style="fill: var(--zen-folder-stroke);" />
     </g>
+
+    <!-- 2. INNER PANE — rect 2 of the source (x11 y38, 178x133, rx 10). Transparent idle,
+         fills with the front-bgcolor token on active. No border. -->
+    <g class="zen-easels-inner-pane" style="transform-origin: 64px 71.28px;">
+      <rect class="zen-easels-bg" x="16.16" y="36.04" width="95.68" height="70.48" rx="8"
+            style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
+      <rect class="zen-easels-gradient" x="16.16" y="36.04" width="95.68" height="70.48" rx="8"
+            style="fill: url(#zen-easels-grad-front); fill-opacity: 0;" />
+    </g>
+
+    <!-- 3. SQUIGGLE — doodle on the pane. Stroke token. The 0.82 rest scale is repeated in
+         every keyframe of zenEaselsSquiggle, the way the Boosts pieces carry theirs. -->
+    <g class="zen-easels-squiggle" style="transform-origin: 64px 71.28px; transform: scale(0.72);">
+      <path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31"
+            style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px; stroke-linecap: round; stroke-linejoin: round;" />
+    </g>
+
   </g>
 </svg>`;
                         }
