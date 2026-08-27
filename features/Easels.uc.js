@@ -96,9 +96,7 @@
                 // already open" — so with an easel tab up the button just focused it and
                 // nothing appeared to happen. It creates a board now.
                 onclick: () => this._newEasel()
-            }, [
-                this.el("div", { className: "easel-card-plus" })
-            ]));
+            }));
 
             const term = (this._searchTerm || "").trim().toLowerCase();
             const visible = term
@@ -148,17 +146,13 @@
         }
 
         _card(entry) {
-            const thumb = this.el("div", { className: "easel-card-thumb" });
-            this._applyThumbnail(thumb, entry.id);
-
-            return this.el("button", {
+            const card = this.el("button", {
                 className: "easel-card",
                 type: "button",
                 title: entry.title || "Untitled Easel",
                 oncontextmenu: e => this._contextMenu(e, entry),
                 onclick: () => this._openEasel(entry.id)
             }, [
-                thumb,
                 this.el("div", { className: "easel-card-info" }, [
                     this.el("div", { className: "easel-card-title", textContent: entry.title || "Untitled Easel" }),
                     this.el("div", {
@@ -170,6 +164,8 @@
                     })
                 ])
             ]);
+            this._applyThumbnail(card, entry.id);
+            return card;
         }
 
         // Thumbnails are optional; a board that has never been saved since thumbnails

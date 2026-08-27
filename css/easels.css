@@ -5,22 +5,10 @@
  */
 
 .easel-card-grid {
-  /* absolute + inset:0 inside .library-content (position:relative; overflow:hidden),
-     matching .media-grid and .library-list-container. Every other section does this;
-     Easels was laid out in flow, so the grid took its full content height, and that
-     height propagated up .library-content -> #zen-library-main-panel -> :host, whose
-     height:100% then had no definite parent to resolve against. The whole element
-     grew past the window (991px against an 868px window) and carried the sidebar's
-     Exit Library below the fold with it. Out of flow, the grid can no longer size
-     anything above it. */
   position: absolute;
   inset: 0;
   display: grid;
-  /* Two columns on purpose. The easels tab widens the library to 440px so each
-     tile has ~160px; minmax(0, 1fr) lets them shrink instead of overflowing. */
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  /* Rows keep their natural height rather than stretching to fill the box now that
-     the grid is as tall as the panel. */
   align-content: start;
   gap: 18px;
   padding: 16px 18px 12px 18px;
@@ -31,46 +19,41 @@
   scrollbar-color: color-mix(in srgb, currentColor, transparent 50%) transparent;
 }
 
-/* Easels appends its empty state into the grid itself rather than beside it, so it has
-   to span every column — otherwise it renders as one cell in column 1, next to the
-   "New easel" card. It stays in the normal row flow so it does not stretch the first
-   row to the full panel height. */
 .easel-card-grid > .empty-state {
   grid-column: 1 / -1;
 }
 
 .easel-card {
+  --easel-card-radius: var(--border-radius-medium, 8px);
   position: relative;
   aspect-ratio: 1;
   overflow: hidden;
-  display: flex;
+  display: grid;
+  place-items: center;
   padding: 0;
   border: none;
-  border-radius: var(--border-radius-medium, 8px);
-  background: transparent;
+  border-radius: var(--easel-card-radius);
+  background-color: var(--zen-toolbar-element-bg, rgba(128, 128, 128, 0.10));
+  background-size: cover;
+  background-position: top center;
+  background-repeat: no-repeat;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: box-shadow 0.2s ease;
 }
 
-.easel-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: transparent;
-  transition: background 0.2s ease;
-  z-index: 1;
-  pointer-events: none;
-  border-radius: inherit;
+.easel-card:not(.easel-card-new) {
+  clip-path: inset(0 round var(--easel-card-radius));
 }
 
-.easel-card:hover::after {
-  background: rgba(0, 0, 0, 0.4);
+.easel-card.has-thumb {
+  background-color: transparent;
 }
 
-.easel-card-new:hover::after {
-  background: transparent;
+.easel-card:hover:not(.easel-card-new) {
+  box-shadow: inset 0 0 0 100vmax rgba(0, 0, 0, 0.4);
 }
 
 .easel-card:focus-visible {
@@ -84,28 +67,11 @@
   padding: 0;
 }
 
-.easel-card-thumb {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background-color: var(--zen-toolbar-element-bg, rgba(128, 128, 128, 0.10));
-  background-size: cover;
-  background-position: top center;
-  background-repeat: no-repeat;
-}
-
-/* Boards saved before thumbnails existed keep the plain tile rather than a broken
-   image, so the grid stays even. */
-.easel-card-thumb.has-thumb {
-  background-color: transparent;
-}
-
-/* Name and meta sit on the thumbnail and slide up on hover, matching .media-info. */
 .easel-card-info {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: -1px;
+  left: -1px;
+  right: -1px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -121,6 +87,7 @@
               opacity 0.2s var(--zen-library-easing, ease);
   pointer-events: none;
   z-index: 2;
+  border-radius: 0 0 var(--easel-card-radius) var(--easel-card-radius);
 }
 
 .easel-card:hover .easel-card-info {
@@ -144,20 +111,15 @@
   text-overflow: ellipsis;
 }
 
-/* Same square tile as the boards so the two-column grid reads as one set of equals.
-   Render puts this card first, so it occupies the top of the left column. */
-.easel-card-new .easel-card-plus {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  border-radius: inherit;
+
+.easel-card-new {
+  background-color: transparent;
   border: 2px dashed color-mix(in srgb, currentColor 50%, transparent);
   box-sizing: border-box;
   line-height: 1;
 }
 
-.easel-card-new .easel-card-plus::before {
+.easel-card-new::before {
   content: "+";
   font-size: 32px;
   font-weight: 300;
@@ -168,11 +130,11 @@
   transition: color 0.15s var(--zen-library-easing, ease);
 }
 
-.easel-card-new:hover .easel-card-plus {
+.easel-card-new:hover {
   border-color: color-mix(in srgb, currentColor 70%, transparent);
 }
 
-.easel-card-new:hover .easel-card-plus::before {
+.easel-card-new:hover::before {
   content: "New easel";
   font-size: 13px;
   font-weight: 600;
