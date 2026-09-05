@@ -14,8 +14,11 @@
             this._renderedCount = 0;
             this._lastGroupLabel = null;
             this._isFetching = false;
+            this._historyOffset = 0;
+            this._hasMoreHistory = true;
             this._initialized = false; // Track if data has been pre-fetched
             this._unsubscribe = null;  // [audit] BUG-2 — store subscription, released in destroy()
+            this._moreObserver = null;
         }
 
         /**
@@ -160,42 +163,13 @@
                 navItems.appendChild(clearItem);
                 historyContainer.appendChild(navItems);
 
-                if (this._items.length === 0 && !this._isLoading) {
-                    this.fetchHistory().then(() => {
-                        this.renderBatch(true);
-                        onLoaded();
-                    });
-                } else {
+                this.fetchHistory({ reset: true }).then(() => {
                     this.renderBatch(true);
                     onLoaded();
-                }
+                });
             };
 
-            // If already initialized (pre-fetched), skip loading and render instantly
-            if (this._initialized && this._items.length > 0) {
-                startLoading();
-                historyContainer.classList.add("library-content-fade-in");
-                setTimeout(() => historyContainer.classList.add("scrollbar-visible"), 50);
-                // Trigger background sync (deferred to avoid stutter during transition)
-                setTimeout(() => this.sync(), 400);
-                return wrapper;
-            }
-
-            // No cache - show loading screen
-            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" }, [
-                this.el("div", { className: "empty-icon history-icon" }),
-                this.el("h3", { textContent: "Preparing history..." }),
-                this.el("p", { textContent: "Gathering your browsing history." })
-            ]);
-            historyContainer.appendChild(loading);
-
-            const delay = isTransitioning ? 400 : 200;
-            setTimeout(() => {
-                const l = historyContainer.querySelector(".empty-state");
-                if (l) l.remove();
-                startLoading();
-            }, delay);
+            startLoading();
 
             return wrapper;
         }
@@ -237,7 +211,7 @@
                     this._highlightNewerThan = currentHead ? currentHead.time : 0;
 
                     // Do full fetch
-                    await this.fetchHistory();
+                    await this.fetchHistory({ reset: true });
                     this.renderBatch(true);
 
                     // Reset after render
@@ -265,42 +239,71 @@
             this._container = null;
             this._closedWindowsContainer = null;
             this._wrapper = null;
+            this._disconnectMoreObserver();
         }
 
-        async fetchHistory() {
+        async fetchHistory({ reset = false } = {}) {
+            if (this._isLoading) return false;
+            if (!reset && !this._hasMoreHistory) return false;
             this._isLoading = true;
             try {
                 const { PlacesUtils } = ChromeUtils.importESModule("resource://gre/modules/PlacesUtils.sys.mjs");
-                const query = PlacesUtils.history.getNewQuery();
-                const options = PlacesUtils.history.getNewQueryOptions();
-                options.sortingMode = options.SORT_BY_DATE_DESCENDING;
-                options.maxResults = 500;
 
-                const result = PlacesUtils.history.executeQuery(query, options);
-                const root = result.root;
-                root.containerOpen = true;
-
-                const items = [];
-                for (let i = 0; i < root.childCount; i++) {
-                    const node = root.getChild(i);
-                    items.push({
-                        uri: node.uri,
-                        title: node.title || node.uri,
-                        time: node.time,
-                        timeStr: new Date(node.time / 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                        dateStr: new Date(node.time / 1000).toLocaleDateString("en-GB", { day: '2-digit', month: '2-digit', year: 'numeric' })
-                    });
+                if (reset) {
+                    this._items = [];
+                    this._historyOffset = 0;
+                    this._hasMoreHistory = true;
+                    this._renderedCount = 0;
+                    this._lastGroupLabel = null;
                 }
-                root.containerOpen = false;
+
+                const pageSize = Math.max(this._batchSize * 2, 60);
+                const db = await PlacesUtils.promiseDBConnection();
+                const params = {
+                    limit: pageSize,
+                    offset: this._historyOffset,
+                    search: `%${this._searchTerm.replace(/[\\%_]/g, "\\$&").toLowerCase()}%`
+                };
+                const hasSearch = !!this._searchTerm;
+                const rows = await db.executeCached(`
+                    SELECT
+                        p.url AS uri,
+                        COALESCE(p.title, p.url) AS title,
+                        h.visit_date AS time
+                    FROM moz_historyvisits h
+                    JOIN moz_places p ON p.id = h.place_id
+                    WHERE (:hasSearch = 0 OR LOWER(p.url) LIKE :search ESCAPE '\\' OR LOWER(COALESCE(p.title, p.url)) LIKE :search ESCAPE '\\')
+                    ORDER BY h.visit_date DESC
+                    LIMIT :limit OFFSET :offset
+                `, { ...params, hasSearch: hasSearch ? 1 : 0 });
+
+                const items = rows.map(row => {
+                    const uri = row.getResultByName("uri");
+                    const title = row.getResultByName("title") || uri;
+                    const time = Number(row.getResultByName("time")) || 0;
+                    return {
+                        uri,
+                        title,
+                        time,
+                        timeStr: new Date(time / 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                        dateStr: new Date(time / 1000).toLocaleDateString("en-GB", { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    };
+                });
+
+                this._items.push(...items);
+                this._historyOffset += rows.length;
+                this._hasMoreHistory = rows.length === pageSize;
 
                 // dispatch to store
                 if (this.library.store) {
-                    this.library.store.dispatch({ type: 'SET_HISTORY', payload: items });
+                    this.library.store.dispatch({ type: 'SET_HISTORY', payload: this._items });
                 } else {
-                    this._items = items;
+                    this._items = this._items;
                 }
+                return true;
             } catch (e) {
                 console.error("ZenLibrary History Fetch Error:", e);
+                return false;
             } finally {
                 this._isLoading = false;
             }
@@ -317,6 +320,7 @@
                 }
 
                 if (reset) {
+                    this._disconnectMoreObserver();
                     const navItems = this._container.querySelectorAll(".history-nav-static");
                     this._container.innerHTML = "";
                     navItems.forEach(i => this._container.appendChild(i));
@@ -324,12 +328,7 @@
                     this._lastGroupLabel = null;
                 }
 
-                const filtered = this._searchTerm
-                    ? this._items.filter(i =>
-                        i.title.toLowerCase().includes(this._searchTerm.toLowerCase()) ||
-                        i.uri.toLowerCase().includes(this._searchTerm.toLowerCase())
-                    )
-                    : this._items;
+                const filtered = this._items;
 
                 if (filtered.length === 0 && !this._isLoading) {
                     if (!reset) return;
@@ -413,14 +412,50 @@
                 this._renderedCount += nextBatch.length;
                 const oldSpacer = this._container.querySelector(".history-bottom-spacer");
                 if (oldSpacer) oldSpacer.remove();
+                const oldSentinel = this._container.querySelector(".history-load-more-sentinel");
+                if (oldSentinel) oldSentinel.remove();
                 this._container.appendChild(fragment);
+                if (this._renderedCount < filtered.length || this._hasMoreHistory) {
+                    const sentinel = this.el("div", {
+                        className: "history-load-more-sentinel",
+                        ariaHidden: "true"
+                    });
+                    this._container.appendChild(sentinel);
+                    this._observeMore(sentinel);
+                }
                 this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
             } catch (e) {
                 console.error("ZenLibrary Error in renderBatch:", e);
             }
         }
 
-        loadMore() { if (!this._isLoading) this.renderBatch(false); }
+        async loadMore() {
+            if (this._isLoading) return;
+            if (this._renderedCount < this._items.length) {
+                this.renderBatch(false);
+                return;
+            }
+            if (!this._hasMoreHistory) return;
+            await this.fetchHistory();
+            this.renderBatch(false);
+        }
+
+        _observeMore(sentinel) {
+            if (!sentinel || !this._container) return;
+            this._moreObserver = new IntersectionObserver((entries) => {
+                if (!entries.some(entry => entry.isIntersecting)) return;
+                this._disconnectMoreObserver();
+                this.loadMore();
+            }, { root: this._container, rootMargin: "300px 0px" });
+            this._moreObserver.observe(sentinel);
+        }
+
+        _disconnectMoreObserver() {
+            if (this._moreObserver) {
+                this._moreObserver.disconnect();
+                this._moreObserver = null;
+            }
+        }
 
         _copyToClipboard(text) {
             try {

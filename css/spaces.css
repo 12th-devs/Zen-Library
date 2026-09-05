@@ -121,10 +121,10 @@
 .library-workspace-card-header {
     display: flex;
     align-items: center;
-    gap: calc(var(--toolbarbutton-inner-padding) - 1px);
+    gap: 7px;
     position: relative;
     z-index: 2;
-    padding: 0 8px;
+    padding: 4px 7px 8px;
     opacity: 0.8;
     flex-shrink: 0;
 }
@@ -184,7 +184,7 @@
     justify-content: center;
     width: 24px;
     height: 24px;
-    padding: 4px;
+    padding: 3px 4px;
     margin-right: -5px;
     transition: opacity 0.2s ease;
     border-radius: 4px;
@@ -257,6 +257,9 @@
     height: 16px;
     border-radius: 3px;
     flex-shrink: 0;
+    -moz-context-properties: fill, stroke, fill-opacity;
+    fill: currentColor;
+    stroke: currentColor;
 }
 
 .library-workspace-item .item-label {
@@ -508,7 +511,7 @@
 /* === 9. CARD FOOTER & DRAG HANDLE === */
 
 .library-card-footer {
-    padding: 0 8px;
+    padding: 8px 7px 2px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -521,8 +524,8 @@
 
 .library-workspace-drag-handle {
     cursor: grab;
-    padding: 8px 0;
-    margin: 0 0 -4px 0;
+    padding: 4px 6px;
+    margin: 0 0 -2px -6px;
     border-radius: 4px;
     transition: opacity 0.2s;
     user-select: none;
@@ -551,6 +554,7 @@
 
 .library-workspace-card[dragged="true"] {
     position: fixed !important;
+    cursor: grabbing;
     z-index: 10000 !important;
     pointer-events: none;
     transform-origin: center center;
@@ -657,6 +661,6 @@
 
 .library-workspace-card-header {
     margin-bottom: 8px;
-    padding-bottom: 2px;
+    padding-bottom: 6px;
     border-bottom: none !important;
 }

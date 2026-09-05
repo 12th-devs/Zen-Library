@@ -9,7 +9,14 @@
             this._cachedDownloads = null; // Pre-fetched data cache
             this._isFetching = false;
             this._progressTimer = null;
+            this._renamedTargets = new Map();
+            this._renderToken = 0;
+            this._visibleLimit = ZenLibraryDownloads.INITIAL_RENDER_LIMIT;
+            this._moreObserver = null;
         }
+
+        static INITIAL_RENDER_LIMIT = 50;
+        static RENDER_BATCH_SIZE = 50;
 
         /**
          * Background initialization - called at startup to pre-fetch data
@@ -37,14 +44,18 @@
             wrapper.appendChild(container);
             this._container = container;
             this.library._downloadsContainer = container;
+            const token = ++this._renderToken;
+            this._visibleLimit = ZenLibraryDownloads.INITIAL_RENDER_LIMIT;
 
             // If we have cached data, render instantly
             if (this._cachedDownloads) {
                 this.renderList(this._cachedDownloads);
                 container.classList.add("library-content-fade-in");
-                setTimeout(() => container.classList.add("scrollbar-visible"), 50);
+                requestAnimationFrame(() => {
+                    if (this._canRender(token, container)) container.classList.add("scrollbar-visible");
+                });
                 // Trigger a background sync to check for updates
-                this.sync();
+                this.sync(token, container);
                 return wrapper;
             }
 
@@ -57,15 +68,18 @@
             container.appendChild(loading);
 
             const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const delay = isTransitioning ? 300 : 100;
+            const delay = isTransitioning ? 120 : 0;
             setTimeout(() => {
                 this.fetchDownloads().then(downloads => {
+                    if (!this._canRender(token, container)) return;
                     this._cachedDownloads = downloads;
                     const l = container.querySelector(".empty-state");
                     if (l) l.remove();
                     this.renderList(downloads);
                     container.classList.add("library-content-fade-in");
-                    setTimeout(() => container.classList.add("scrollbar-visible"), 100);
+                    requestAnimationFrame(() => {
+                        if (this._canRender(token, container)) container.classList.add("scrollbar-visible");
+                    });
                 });
             }, delay);
 
@@ -76,9 +90,10 @@
          * Sync - called after rendering cached data to check for updates
          * Always re-fetches to detect status changes (e.g., deleted files)
          */
-        async sync() {
+        async sync(token = this._renderToken, container = this._container) {
             try {
                 const freshDownloads = await this.fetchDownloads();
+                if (!this._canRender(token, container)) return;
 
                 // Always update cache and re-render to catch status changes
                 // Status changes (deleted, completed) don't change length/timestamp
@@ -89,36 +104,40 @@
             }
         }
 
+        _canRender(token, container) {
+            return token === this._renderToken &&
+                this._container === container &&
+                this.library?.activeTab === "downloads" &&
+                container?.isConnected;
+        }
+
 
         async fetchDownloads() {
+            const startedAt = performance.now();
             try {
                 const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
                 const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
                 const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
 
+                console.log("[ZenLibrary Downloads] fetch start");
                 const isPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
                 const historyList = await DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
                 const allDownloadsRaw = await historyList.getAll();
                 const liveDownloads = await this.fetchLiveDownloads(Downloads);
 
-                return allDownloadsRaw.map(d => {
+                const downloads = allDownloadsRaw.map(d => {
                     const liveDownload = this.findMatchingLiveDownload(d, liveDownloads);
                     const progressSource = liveDownload || d;
                     let filename = "Unknown Filename";
-                    let targetPath = "";
-                    let fileExists = false;
+                    const targetInfo = this.resolveDownloadTarget(d, liveDownload);
+                    const targetPath = targetInfo.path;
+                    const fileExists = targetInfo.exists;
 
-                    if (d.target && d.target.path) {
-                        try {
-                            let file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
-                            file.initWithPath(d.target.path);
-                            fileExists = file.exists();
-                            filename = file.leafName;
-                            targetPath = d.target.path;
-                        } catch (e) {
-                            const pathParts = String(d.target.path).split(/[\\/]/);
-                            filename = pathParts.pop() || "ErrorInPathUtil";
-                        }
+                    if (targetInfo.leafName) {
+                        filename = targetInfo.leafName;
+                    } else if (d.target && d.target.path) {
+                        const pathParts = String(d.target.path).split(/[\\/]/);
+                        filename = pathParts.pop() || "ErrorInPathUtil";
                     }
 
                     if ((filename === "Unknown Filename" || filename === "ErrorInPathUtil") && d.source && d.source.url) {
@@ -163,7 +182,7 @@
                         totalBytes = progressBytes;
                     }
 
-                    if (status === "completed" && d.target && d.target.path && !fileExists) {
+                    if (status === "completed" && (targetPath || d.target?.path) && !fileExists) {
                         status = "deleted";
                     }
 
@@ -189,8 +208,19 @@
                 // be served from _cachedDownloads. Matches how Media does it.
                 }).filter(d => d.timestamp);
 
+                console.log("[ZenLibrary Downloads] fetch complete", {
+                    historyItems: allDownloadsRaw.length,
+                    renderedItems: downloads.length,
+                    liveItems: liveDownloads.length,
+                    elapsedMs: Math.round(performance.now() - startedAt)
+                });
+                return downloads;
+
             } catch (e) {
-                console.error("ZenLibrary: Error fetching downloads", e);
+                console.error("ZenLibrary: Error fetching downloads", {
+                    error: e,
+                    elapsedMs: Math.round(performance.now() - startedAt)
+                });
                 return [];
             }
         }
@@ -204,6 +234,93 @@
             } catch (e) {
                 console.warn("[ZenLibrary Downloads] Live download lookup failed:", e);
                 return [];
+            }
+        }
+
+        resolveDownloadTarget(historyDownload, liveDownload) {
+            const candidates = [
+                liveDownload?.target?.path,
+                this._renamedTargets.get(this.normalizeDownloadPath(historyDownload?.target?.path)),
+                historyDownload?.target?.path
+            ];
+
+            for (const candidate of candidates) {
+                const resolved = this.inspectTargetPath(candidate);
+                if (resolved.exists) return resolved;
+            }
+
+            const recovered = this.findRenamedTargetInOriginalFolder(historyDownload);
+            if (recovered.exists) {
+                const oldKey = this.normalizeDownloadPath(historyDownload?.target?.path);
+                if (oldKey) this._renamedTargets.set(oldKey, recovered.path);
+                return recovered;
+            }
+
+            return this.inspectTargetPath(candidates.find(Boolean));
+        }
+
+        inspectTargetPath(path) {
+            if (!path || typeof path !== "string") {
+                return { path: "", exists: false, leafName: "" };
+            }
+
+            try {
+                const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+                file.initWithPath(path);
+                return {
+                    path: file.path,
+                    exists: file.exists(),
+                    leafName: file.leafName || ""
+                };
+            } catch (e) {
+                const pathParts = String(path).split(/[\\/]/);
+                return {
+                    path: String(path),
+                    exists: false,
+                    leafName: pathParts.pop() || ""
+                };
+            }
+        }
+
+        findRenamedTargetInOriginalFolder(download) {
+            const originalPath = download?.target?.path;
+            if (!originalPath) return { path: "", exists: false, leafName: "" };
+
+            try {
+                const originalFile = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+                originalFile.initWithPath(originalPath);
+                const parent = originalFile.parent;
+                if (!parent || !parent.exists() || !parent.isDirectory()) {
+                    return { path: originalPath, exists: false, leafName: originalFile.leafName || "" };
+                }
+
+                const expectedSize = Number(download.target?.size ?? download.currentBytes ?? download.totalBytes) || 0;
+                if (expectedSize <= 0) {
+                    return { path: originalPath, exists: false, leafName: originalFile.leafName || "" };
+                }
+
+                const expectedTime = new Date(download.endTime || download.startTime || 0).getTime();
+                const maxTimeDelta = 24 * 60 * 60 * 1000;
+                let best = null;
+                const entries = parent.directoryEntries;
+
+                while (entries.hasMoreElements()) {
+                    const entry = entries.getNext().QueryInterface(Components.interfaces.nsIFile);
+                    if (!entry || !entry.isFile() || entry.path === originalPath) continue;
+                    if (Number(entry.fileSize) !== expectedSize) continue;
+
+                    const timeDelta = expectedTime ? Math.abs(Number(entry.lastModifiedTime) - expectedTime) : 0;
+                    if (expectedTime && timeDelta > maxTimeDelta) continue;
+                    if (!best || timeDelta < best.timeDelta) {
+                        best = { path: entry.path, exists: true, leafName: entry.leafName || "", timeDelta };
+                    }
+                }
+
+                if (best) return best;
+                return { path: originalPath, exists: false, leafName: originalFile.leafName || "" };
+            } catch (e) {
+                console.warn("[ZenLibrary Downloads] Rename recovery failed:", e);
+                return this.inspectTargetPath(originalPath);
             }
         }
 
@@ -267,7 +384,10 @@
                 this._progressTimer = null;
                 if (!this._container || this.library.activeTab !== "downloads") return;
 
+                const token = this._renderToken;
+                const container = this._container;
                 const freshDownloads = await this.fetchDownloads();
+                if (!this._canRender(token, container)) return;
                 this._cachedDownloads = freshDownloads;
                 this.renderList(freshDownloads);
             }, 1000);
@@ -276,13 +396,14 @@
         renderList(downloads) {
             try {
                 if (!this._container) return;
-                
+                this._disconnectMoreObserver();
+
                 // Check if custom elements are properly registered
                 if (!customElements.get('zen-library-item')) {
                     console.error("ZenLibrary Error in renderList: zen-library-item custom element not registered");
                     return;
                 }
-                
+
                 this._container.innerHTML = "";
                 this._container.classList.add("scrollbar-visible");
 
@@ -292,6 +413,9 @@
                     const term = this._searchTerm.toLowerCase();
                     downloads = downloads.filter(d => d.filename.toLowerCase().includes(term));
                 }
+                downloads = downloads.slice().sort((a, b) => b.timestamp - a.timestamp);
+                const visibleLimit = Math.min(this._visibleLimit || ZenLibraryDownloads.INITIAL_RENDER_LIMIT, downloads.length);
+                const visibleDownloads = downloads.slice(0, visibleLimit);
 
                 if (downloads.length === 0) {
                     const emptyState = this.el("div", { className: "empty-state" }, [
@@ -314,7 +438,7 @@
                 const monthAgoMidnight = new Date(todayMidnight);
                 monthAgoMidnight.setDate(monthAgoMidnight.getDate() - 30);
 
-                downloads.forEach(d => {
+                visibleDownloads.forEach(d => {
                     const date = new Date(d.timestamp);
                     const dateMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
                     let key;
@@ -353,7 +477,7 @@
                                 console.error("ZenLibrary Error: zen-library-item custom element not properly registered");
                                 return;
                             }
-                            
+
                             itemEl.data = item; // Sets item data and status classes
                             // [audit] BUG-1 — was `moz-icon://${item.targetPath}?size=32`,
                             // interpolating a raw Windows path into a URL. The drive colon
@@ -387,7 +511,7 @@
                                 try {
                                     const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
                                     file.initWithPath(item.targetPath);
-                                    
+
                                     if (!file.exists()) {
                                         e.preventDefault();
                                         return;
@@ -399,10 +523,10 @@
                                     }
 
                                     // Set URI flavors for web pages
-                                    const fileUrl = file.path.startsWith('\\') ? 
-                                        'file:' + file.path.replace(/\\/g, '/') : 
+                                    const fileUrl = file.path.startsWith('\\') ?
+                                        'file:' + file.path.replace(/\\/g, '/') :
                                         'file:///' + file.path.replace(/\\/g, '/');
-                                    
+
                                     if (fileUrl) {
                                         e.dataTransfer.setData('text/uri-list', fileUrl);
                                         e.dataTransfer.setData('text/plain', fileUrl);
@@ -441,10 +565,36 @@
                     });
                 });
 
+                if (visibleLimit < downloads.length) {
+                    const sentinel = this.el("div", {
+                        className: "downloads-load-more-sentinel",
+                        ariaHidden: "true"
+                    });
+                    this._container.appendChild(sentinel);
+                    this._observeMore(sentinel, downloads);
+                }
                 this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
                 this.scheduleProgressRefresh(downloads);
             } catch (e) {
                 console.error("ZenLibrary Error in renderList:", e);
+            }
+        }
+
+        _observeMore(sentinel, downloads) {
+            if (!sentinel || !this._container) return;
+            this._moreObserver = new IntersectionObserver((entries) => {
+                if (!entries.some(entry => entry.isIntersecting)) return;
+                this._disconnectMoreObserver();
+                this._visibleLimit = (this._visibleLimit || ZenLibraryDownloads.INITIAL_RENDER_LIMIT) + ZenLibraryDownloads.RENDER_BATCH_SIZE;
+                requestAnimationFrame(() => this.renderList(downloads));
+            }, { root: this._container, rootMargin: "300px 0px" });
+            this._moreObserver.observe(sentinel);
+        }
+
+        _disconnectMoreObserver() {
+            if (this._moreObserver) {
+                this._moreObserver.disconnect();
+                this._moreObserver = null;
             }
         }
 
@@ -636,6 +786,8 @@
                 this._progressTimer = null;
             }
             this._cachedDownloads = null;
+            this._renderToken++;
+            this._disconnectMoreObserver();
             this._container = null;
         }
 
@@ -713,13 +865,20 @@
                     file.initWithPath(item.targetPath);
                     if (!file.exists()) return;
                     const newName = input.value.trim();
+                    const oldPath = file.path;
                     file.moveTo(file.parent, newName);
+                    const newPath = file.parent.path + (file.parent.path.endsWith("\\") ? "" : "\\") + newName;
+                    this._renamedTargets.set(this.normalizeDownloadPath(oldPath), newPath);
                     item.filename = newName;
-                    item.targetPath = file.parent.path + (file.parent.path.endsWith("\\") ? "" : "\\") + newName;
+                    item.targetPath = newPath;
                     itemEl.setAttribute("title", newName);
                     if (this._cachedDownloads) {
                         const cached = this._cachedDownloads.find(d => d.id === item.id);
-                        if (cached) cached.filename = newName;
+                        if (cached) {
+                            cached.filename = newName;
+                            cached.targetPath = newPath;
+                            cached.status = cached.status === "deleted" ? "completed" : cached.status;
+                        }
                     }
                 } catch (err) {
                     console.error("[ZenLibrary Downloads] Rename failed:", err);
@@ -771,14 +930,14 @@
 
         getContentTypeFromFilename(filename) {
             if (!filename) return 'application/octet-stream';
-            
+
             const ext = filename.toLowerCase().split('.').pop();
             const mimeTypes = {
                 // Images
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
                 'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp',
                 'svg': 'image/svg+xml', 'ico': 'image/x-icon',
-                
+
                 // Documents
                 'pdf': 'application/pdf', 'doc': 'application/msword',
                 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -786,31 +945,31 @@
                 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'ppt': 'application/vnd.ms-powerpoint',
                 'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                
+
                 // Text
                 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
                 'js': 'text/javascript', 'json': 'application/json',
                 'xml': 'text/xml', 'csv': 'text/csv',
-                
+
                 // Audio
                 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
                 'flac': 'audio/flac', 'aac': 'audio/aac', 'm4a': 'audio/mp4',
-                
+
                 // Video
                 'mp4': 'video/mp4', 'avi': 'video/x-msvideo', 'mov': 'video/quicktime',
                 'wmv': 'video/x-ms-wmv', 'flv': 'video/x-flv', 'webm': 'video/webm',
                 'mkv': 'video/x-matroska',
-                
+
                 // Archives
                 'zip': 'application/zip', 'rar': 'application/x-rar-compressed',
                 '7z': 'application/x-7z-compressed', 'tar': 'application/x-tar',
                 'gz': 'application/gzip',
-                
+
                 // Executables
                 'exe': 'application/x-msdownload', 'msi': 'application/x-msi',
                 'deb': 'application/x-debian-package', 'rpm': 'application/x-rpm'
             };
-            
+
             return mimeTypes[ext] || 'application/octet-stream';
         }
     }

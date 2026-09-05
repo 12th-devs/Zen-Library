@@ -230,26 +230,12 @@
                 this._sessionStart = Date.now();
             }
 
-            // Use pre-initialized modules from controller if available
-            // This allows us to use cached data for instant rendering
-            const preInit = window.gZenLibrary && window.gZenLibrary.getModules ? window.gZenLibrary.getModules() : {};
-
-            // Initialize Feature Modules - reuse pre-initialized ones or create new
-            // Pass 'this' to update the library reference
-            this.downloads = preInit.downloads || (window.ZenLibraryDownloads ? new window.ZenLibraryDownloads(this) : null);
-            this.history = preInit.history || (window.ZenLibraryHistory ? new window.ZenLibraryHistory(this) : null);
-            this.media = preInit.media || (window.ZenLibraryMedia ? new window.ZenLibraryMedia(this) : null);
-            this.spaces = preInit.spaces || (window.ZenLibrarySpaces ? new window.ZenLibrarySpaces(this) : null);
-            this.boosts = preInit.boosts || (window.ZenLibraryBoosts ? new window.ZenLibraryBoosts(this) : null);
-            this.easels = preInit.easels || (window.ZenLibraryEasels ? new window.ZenLibraryEasels(this) : null);
-
-            // Update the library reference on pre-initialized modules so they can use our el() helper
-            if (this.downloads) this.downloads.library = this;
-            if (this.history) this.history.library = this;
-            if (this.media) this.media.library = this;
-            if (this.spaces) this.spaces.library = this;
-            if (this.boosts) this.boosts.library = this;
-            if (this.easels) this.easels.library = this;
+            this.downloads = null;
+            this.history = null;
+            this.media = null;
+            this.spaces = null;
+            this.boosts = null;
+            this.easels = null;
         }
 
         get activeTab() { return this._activeTab; }
@@ -287,6 +273,9 @@
                         if (hoverBg) {
                             this.style.setProperty("--zen-library-hover-bg", hoverBg);
                         }
+                        if (this._initialized) {
+                            this.update(true);
+                        }
                     };
                     this._updateColors();
                     this._colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -321,7 +310,7 @@
       <stop offset="1" style="stop-color: rgb(0, 0, 0)"/>
     </linearGradient>
   </defs>
-  
+
   <!--Circle-->
   <g class="zen-downloads-circle-translate" style="transform-origin: 64px 64px;">
     <circle class="zen-downloads-bg" cx="64" cy="64" r="47.5"
@@ -353,32 +342,32 @@
   <!-- Box (Back card) -->
   <g class="zen-history-body-translate" style="transform-origin: 0 0; transform: translate(63.977px, 79.047px);">
     <g transform="translate(-39.867, -30.328)">
-      <path class="zen-history-bg" 
-            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z" 
+      <path class="zen-history-bg"
+            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z"
             style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-      <path class="zen-history-gradient" 
-            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z" 
+      <path class="zen-history-gradient"
+            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z"
             style="fill: url(#zen-history-grad-front); fill-opacity: 0;" />
-      <path class="zen-history-border" 
-            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z" 
+      <path class="zen-history-border"
+            d="M 3.55 0 L 76.184 0 L 76.184 46.856 A 10.25 10.25 0 0 1 65.934 57.106 L 13.8 57.106 A 10.25 10.25 0 0 1 3.55 46.856 Z"
             style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
     </g>
   </g>
 
   <!-- Top Lid (Front card) - Keyframes Merged -->
   <g class="zen-history-lid" style="transform-origin: 0 0; transform: translate(63.977px, 37.148px) rotate(0deg) translate(-46.852px, -12.82px);">
-    <rect class="zen-history-bg" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05" 
+    <rect class="zen-history-bg" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05"
           style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-    <rect class="zen-history-gradient" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05" 
+    <rect class="zen-history-gradient" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05"
           style="fill: url(#zen-history-grad-front); fill-opacity: 0;" />
-    <rect class="zen-history-border" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05" 
+    <rect class="zen-history-border" x="3.55" y="3.55" width="86.603" height="18.541" rx="6.05"
           style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
   </g>
 
   <!-- Dash (path) -->
   <g class="zen-history-dash-translate" style="transform-origin: 0 0; transform: translate(64px, 65px) scale(0.9, 1);">
     <path class="zen-history-dash-path" fill="none"
-          d="M -16 0 L 16 0" 
+          d="M -16 0 L 16 0"
           style="stroke: var(--zen-folder-stroke); stroke-width: 8px; stroke-linecap: round; stroke-linejoin: round;" />
   </g>
 </svg>`;
@@ -410,33 +399,33 @@
   <!-- Wrapped in an untransformed group so the mask coordinates align globally (same as spaces) -->
   <g class="zen-media-back-wrapper" mask="url(#zen-media-mask)">
     <g class="zen-media-back-card" transform="translate(54.799, 57.743) rotate(-7) translate(-46.27, -36.445)">
-      <rect class="zen-media-bg" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+      <rect class="zen-media-bg" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
             style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-      <rect class="zen-media-gradient" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+      <rect class="zen-media-gradient" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
             style="fill: url(#zen-media-grad-back); fill-opacity: 0;" />
-      <rect class="zen-media-border" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+      <rect class="zen-media-border" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
             style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
     </g>
   </g>
 
   <!-- Front card (rect) -->
   <g class="zen-media-front-card" transform="translate(78.827, 77.737) translate(-46.27, -36.445)">
-    <rect class="zen-media-bg" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+    <rect class="zen-media-bg" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
           style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-    <rect class="zen-media-gradient" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+    <rect class="zen-media-gradient" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
           style="fill: url(#zen-media-grad-front); fill-opacity: 0;" />
     <!--Mountain (path)-->
     <g class="zen-media-mountain" transform="translate(0.289, 32.609)">
-      <path class="zen-media-mountain-path" d="M7.432 21.147 L17.865 12.11 C19.665 10.596 21.373 9.862 23.173 9.862 C25.158 9.862 27.005 10.596 28.805 12.202 L36.191 18.853 L54.84 2.431 C56.779 0.734 58.81 0 61.072 0 C63.334 0 65.55 0.826 67.35 2.477 L84.568 18.67 L92 25.78 C92 35.23 87.153 40 77.551 40 L14.495 40 C4.801 40 0 35.275 0 25.78 Z" 
+      <path class="zen-media-mountain-path" d="M7.432 21.147 L17.865 12.11 C19.665 10.596 21.373 9.862 23.173 9.862 C25.158 9.862 27.005 10.596 28.805 12.202 L36.191 18.853 L54.84 2.431 C56.779 0.734 58.81 0 61.072 0 C63.334 0 65.55 0.826 67.35 2.477 L84.568 18.67 L92 25.78 C92 35.23 87.153 40 77.551 40 L14.495 40 C4.801 40 0 35.275 0 25.78 Z"
             style="fill: var(--zen-folder-stroke);" />
     </g>
-    <rect class="zen-media-border" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262" 
+    <rect class="zen-media-border" x="3.55" y="3.55" width="85.439" height="65.791" rx="9.262"
           style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
   </g>
-  
+
   <!--Sun (circle)-->
   <g class="zen-media-sun" transform="translate(64.76, 67.886) translate(-9.914, -9.984)">
-    <circle class="zen-media-sun-path" cx="9.914" cy="9.984" r="9.914" 
+    <circle class="zen-media-sun-path" cx="9.914" cy="9.984" r="9.914"
             style="fill: var(--zen-folder-stroke);" />
   </g>
 </svg>`;
@@ -464,22 +453,22 @@
   <!-- Back Card -->
   <g class="zen-spaces-back-wrapper" mask="url(#zen-spaces-mask)">
     <g class="zen-spaces-back-card" style="transform-origin: 0 0; transform: translate(51.28px, 61.69px) rotate(-17.5deg) translate(-35.022px, -44.68px);">
-      <rect class="zen-spaces-bg" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+      <rect class="zen-spaces-bg" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
             style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-      <rect class="zen-spaces-gradient" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+      <rect class="zen-spaces-gradient" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
             style="fill: url(#zen-spaces-grad-back); fill-opacity: 0;" />
-      <rect class="zen-spaces-border" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+      <rect class="zen-spaces-border" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
             style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
     </g>
   </g>
 
   <!-- Front Card -->
   <g class="zen-spaces-front-card" style="transform-origin: 0 0; transform: translate(77.02px, 75.93px) rotate(0deg) translate(-35.022px, -44.68px);">
-    <rect class="zen-spaces-bg" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+    <rect class="zen-spaces-bg" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
           style="fill: var(--zen-folder-front-bgcolor); fill-opacity: 0;" />
-    <rect class="zen-spaces-gradient" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+    <rect class="zen-spaces-gradient" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
           style="fill: url(#zen-spaces-grad-front); fill-opacity: 0;" />
-    <rect class="zen-spaces-border" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45" 
+    <rect class="zen-spaces-border" x="3.55" y="3.55" width="62.94" height="82.26" rx="10.45"
           style="fill: none; stroke: var(--zen-folder-stroke); stroke-width: 7.1px;" />
   </g>
 </svg>`;
@@ -659,6 +648,23 @@
             }
         }
 
+        _ensureModule(tab = this.activeTab) {
+            if (tab === "downloads" && !this.downloads && window.ZenLibraryDownloads) {
+                this.downloads = new window.ZenLibraryDownloads(this);
+            } else if (tab === "history" && !this.history && window.ZenLibraryHistory) {
+                this.history = new window.ZenLibraryHistory(this);
+            } else if (tab === "media" && !this.media && window.ZenLibraryMedia) {
+                this.media = new window.ZenLibraryMedia(this);
+            } else if (tab === "spaces" && !this.spaces && window.ZenLibrarySpaces) {
+                this.spaces = new window.ZenLibrarySpaces(this);
+            } else if (tab === "boosts" && !this.boosts && window.ZenLibraryBoosts) {
+                this.boosts = new window.ZenLibraryBoosts(this);
+            } else if (tab === "easels" && !this.easels && window.ZenLibraryEasels) {
+                this.easels = new window.ZenLibraryEasels(this);
+            }
+            return this[tab] || null;
+        }
+
         // [audit] BUG-3 — `force` is new, and its absence was a real bug rather than an
         // omission. Four call sites already passed `true` here (Easels' re-render after the
         // index lands, its rename and delete handlers, and the search box), on the
@@ -668,13 +674,16 @@
         // ran, the grid existed and the tab had not changed — so the Easels list never
         // refreshed in place, and typing in its search box did nothing at all.
         update(force = false) {
+            const updateStartedAt = performance.now();
+            const updateTab = this.activeTab;
             try {
+                console.log("[ZenLibrary] update start", { tab: updateTab, force });
                 // Check if custom elements are properly registered
                 if (!customElements.get('zen-library-item')) {
                     console.error("ZenLibrary Error: zen-library-item custom element not registered");
                     return;
                 }
-                
+
                 // Common width calculation
                 // We can rely on Spaces module or default fallback
                 let targetWidth = 340;
@@ -711,6 +720,7 @@
                 const content = this.shadowRoot.querySelector(".library-content");
                 const header = this.shadowRoot.querySelector(".library-header");
                 const tabChanged = this._lastRenderedTab !== this.activeTab;
+                const contentBelongsToTab = content?.dataset?.tab === this.activeTab;
                 this._lastRenderedTab = this.activeTab;
 
                 // Header / Search Bar Logic
@@ -734,7 +744,9 @@
                         this._searchDebounce = window.ZenLibraryUtil.debounce(() => {
                             const tab = this.activeTab;
                             if (tab === "history" && this.history) {
-                                this.history.renderBatch(true);
+                                this.history.fetchHistory({ reset: true }).then(() => {
+                                    this.history.renderBatch(true);
+                                });
                             } else if (tab === "downloads" && this.downloads) {
                                 // Both of these now filter a cached list rather than going
                                 // back to the download history or the filesystem: the fetch
@@ -745,7 +757,11 @@
                                     this.downloads.fetchDownloads().then(d => this.downloads.renderList(d));
                                 }
                             } else if (tab === "media" && this.media) {
-                                this.media.fetchDownloads().then(d => this.media.renderList(d));
+                                if (this.media._scanCache) {
+                                    this.media.renderList(this.media._scanCache);
+                                } else {
+                                    this.media.fetchDownloads().then(d => this.media.renderList(d));
+                                }
                             } else if (tab === "boosts" && this.boosts) {
                                 this.boosts.renderList();
                             } else if (tab === "easels" && this.easels) {
@@ -766,6 +782,16 @@
                                 }
                                 const module = this[this.activeTab];
                                 if (module) module._searchTerm = v;
+                                if (this.activeTab === "downloads" && this.downloads) {
+                                    this.downloads._visibleLimit = window.ZenLibraryDownloads?.INITIAL_RENDER_LIMIT || 50;
+                                }
+                                if (this.activeTab === "history" && this.history) {
+                                    this.history._renderedCount = 0;
+                                    this.history._lastGroupLabel = null;
+                                }
+                                if (this.activeTab === "media" && this.media) {
+                                    this.media._visibleLimit = window.ZenLibraryMedia?.INITIAL_RENDER_LIMIT || 36;
+                                }
                                 this._searchDebounce();
                             }
                         });
@@ -791,20 +817,7 @@
                 let elToAppend = null;
                 let needsAppend = false;
 
-                // Lazy load features if they weren't available during constructor
-                if (!this.downloads && window.ZenLibraryDownloads) this.downloads = new window.ZenLibraryDownloads(this);
-                if (!this.history && window.ZenLibraryHistory) this.history = new window.ZenLibraryHistory(this);
-                if (!this.media && window.ZenLibraryMedia) this.media = new window.ZenLibraryMedia(this);
-                if (!this.spaces && window.ZenLibrarySpaces) this.spaces = new window.ZenLibrarySpaces(this);
-                if (!this.boosts && window.ZenLibraryBoosts) this.boosts = new window.ZenLibraryBoosts(this);
-                if (!this.easels && window.ZenLibraryEasels) {
-                    this.easels = new window.ZenLibraryEasels(this);
-                    // Registered with the controller as well, or destroy() cannot find it
-                    // and its cached thumbnail blob URLs are never revoked.
-                    if (window.gZenLibrary && window.gZenLibrary._modules) {
-                        window.gZenLibrary._modules.easels = this.easels;
-                    }
-                }
+                this._ensureModule(this.activeTab);
 
                 if (this.activeTab === "spaces" && this.spaces) {
                     // Spaces has its own intelligent re-render check usually
@@ -814,25 +827,25 @@
                     needsAppend = true; // Always append correctly returned wrapper
                 }
                 else if (this.activeTab === "history" && this.history) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.history.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "downloads" && this.downloads) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.downloads.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "media" && this.media) {
-                    if (!content.querySelector(".media-grid") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".media-grid") || tabChanged || force) {
                         elToAppend = this.media.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "boosts" && this.boosts) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.boosts.render();
                         needsAppend = true;
                     }
@@ -842,7 +855,7 @@
                     // section whose contents change from underneath it (a board created in
                     // another tab, a rename, a delete, a search term) while the container it
                     // lives in stays exactly where it was.
-                    if (!content.querySelector(".easel-card-grid") || tabChanged || force) {
+                    if (!contentBelongsToTab || !content.querySelector(".easel-card-grid") || tabChanged || force) {
                         elToAppend = this.easels.render();
                         needsAppend = true;
                     }
@@ -851,6 +864,7 @@
                 if (needsAppend && elToAppend) {
                     content.innerHTML = "";
                     content.appendChild(elToAppend);
+                    content.dataset.tab = this.activeTab;
                 } else if (!this[this.activeTab] && !elToAppend && tabChanged) {
                     // Fallback if module missing
                     content.innerHTML = `<div class="empty-state library-content-fade-in">
@@ -858,10 +872,20 @@
                          <h3>Feature not available</h3>
                          <p>The ${this.activeTab} module is not loaded.</p>
                        </div>`;
+                    content.dataset.tab = this.activeTab;
                 }
+                console.log("[ZenLibrary] update complete", {
+                    tab: this.activeTab,
+                    rendered: needsAppend,
+                    elapsedMs: Math.round(performance.now() - updateStartedAt)
+                });
 
             } catch (e) {
-                console.error("ZenLibrary Error in update:", e);
+                console.error("ZenLibrary Error in update:", {
+                    tab: updateTab,
+                    error: e,
+                    elapsedMs: Math.round(performance.now() - updateStartedAt)
+                });
                 const content = this.shadowRoot.querySelector(".library-content");
                 // textContent, not innerHTML. This runs in privileged chrome and e.message
                 // is not a fixed string — it carries URLs, filenames and titles from
@@ -983,51 +1007,12 @@
             // button (and everything else that goes through it) dead.
             this._initTimer = setTimeout(() => {
                 this._initTimer = null;
-                this._initModules();
                 this._createToolbarButton();
             }, 2000);
         }
 
         _onUnload() {
             this.destroy({ widget: false });
-        }
-
-        /**
-         * Initialize persistent module instances and trigger background data fetching
-         */
-        _initModules() {
-            // Create a minimal "shell" object for modules that need library.el helper
-            const shell = this._createModuleShell();
-
-            try {
-                if (window.ZenLibraryDownloads && !this._modules.downloads) {
-                    this._modules.downloads = new window.ZenLibraryDownloads(shell);
-                    if (this._modules.downloads.init) this._modules.downloads.init();
-                }
-                if (window.ZenLibraryHistory && !this._modules.history) {
-                    this._modules.history = new window.ZenLibraryHistory(shell);
-                    if (this._modules.history.init) this._modules.history.init();
-                }
-                if (window.ZenLibraryMedia && !this._modules.media) {
-                    this._modules.media = new window.ZenLibraryMedia(shell);
-                    // Media doesn't need init for now as it's not as critical
-                }
-                if (window.ZenLibrarySpaces && !this._modules.spaces) {
-                    this._modules.spaces = new window.ZenLibrarySpaces(shell);
-                }
-                if (window.ZenLibraryBoosts && !this._modules.boosts) {
-                    this._modules.boosts = new window.ZenLibraryBoosts(shell);
-                    if (this._modules.boosts.init) this._modules.boosts.init();
-                }
-                if (window.ZenLibraryEasels && !this._modules.easels) {
-                    this._modules.easels = new window.ZenLibraryEasels(shell);
-                    // Warms the index off disk so the first render of the section has
-                    // cards in it rather than an empty state that fills in a frame later.
-                    if (this._modules.easels.init) this._modules.easels.init();
-                }
-            } catch (e) {
-                console.error("ZenLibrary: Module initialization error", e);
-            }
         }
 
         /**
@@ -1594,7 +1579,7 @@
             }
             this._isOpen ? this.close() : this.open();
         }
-        
+
         /**
          * Open the library with a specific tab selected, or close if already on that tab
          * @param {string} tabName - One of the ids in the check below
@@ -1604,22 +1589,22 @@
             if (!tabName || !["downloads", "history", "media", "easels", "spaces", "boosts"].includes(tabName)) {
                 return;
             }
-            
+
             // If already open on the same tab, close the library
             if (this._isOpen && this._element && this._element.activeTab === tabName) {
                 this.close();
                 return;
             }
-            
+
             // Set the desired tab before opening
             this.lastActiveTab = tabName;
-            
+
             // If already open but on a different tab, switch to the requested tab
             if (this._isOpen && this._element) {
                 this._element.activeTab = tabName;
                 return;
             }
-            
+
             // Otherwise, open the library (it will use lastActiveTab)
             this.open();
         }
@@ -1675,7 +1660,7 @@
 
             if (isRightSide) b.append(this._element);
             else b.prepend(this._element);
-            
+
 
             if (!isCompactHidden) {
                 document.documentElement.setAttribute("zen-library-open", "true");
@@ -1685,15 +1670,15 @@
 
             requestAnimationFrame(() => requestAnimationFrame(() => this._element?.update()));
 
-            setTimeout(() => { 
-                this._isTransitioning = false; 
+            setTimeout(() => {
+                this._isTransitioning = false;
             }, 60);
         }
 
         close() {
             if (!this._isOpen || !this._element || this._isTransitioning) return;
-            if (this._modules.media && typeof this._modules.media._stopCurrentAudio === "function") {
-                this._modules.media._stopCurrentAudio();
+            if (this._element.media && typeof this._element.media._stopCurrentAudio === "function") {
+                this._element.media._stopCurrentAudio();
             }
             const el = this._element;
             this._isTransitioning = true;

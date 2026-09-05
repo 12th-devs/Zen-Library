@@ -63,23 +63,23 @@
             const oldScroll = oldGrid ? oldGrid.scrollLeft : 0;
 
             const { workspaces, width } = ZenLibrarySpaces.getData();
-            // We return the grid to be appended by the main update loop, 
+            // We return the grid to be appended by the main update loop,
             // OR we can manage the container ourselves if the shell delegates that.
-            // Based on ZenLibrary.uc.js's shell logic, it calls render() but also handles the grid creation 
+            // Based on ZenLibrary.uc.js's shell logic, it calls render() but also handles the grid creation
             // in its `update()` method for sticky headers etc?
             // Actually, the main shell's update() seems to handle the High Level structure.
             // But if we want to modularize, we should do as much as possible here.
 
-            // However, the main shell's `update()` (lines 2856+ in backup) does a lot of heavy lifting 
+            // However, the main shell's `update()` (lines 2856+ in backup) does a lot of heavy lifting
             // including calculating width and diffing hash.
             // The REFRACTORED ZenLibrary.uc.js (which we verified) delegates to `.update()`?
             // No, the refactored ZenLibrary.uc.js calls `this._spaces.render()`?
-            // Let's look at the refactored ZenLibrary.uc.js ... I don't have it fully in memory 
+            // Let's look at the refactored ZenLibrary.uc.js ... I don't have it fully in memory
             // but the plan was for `renderSpaces()` or similar.
 
             // Assuming the shell calls `render()` and expects an element back.
             // BUT, the Spaces UI is a horizontal grid that affects the WINDOW WIDTH.
-            // The logic to resize the window (`this.style.setProperty("--zen-library-width"...)`) 
+            // The logic to resize the window (`this.style.setProperty("--zen-library-width"...)`)
             // IS in the shell's `update()`.
 
             // So this module should primarily return the CONTENT (the grid).
@@ -365,18 +365,17 @@
                     void card.offsetWidth;
                     const scaledRect = card.getBoundingClientRect();
                     const initialOffsetX = e.clientX - scaledRect.left;
-                    const initialOffsetY = e.clientY - scaledRect.top;
+                    const lockedY = preDragRect.top;
 
                     const originalIndex = Array.from(grid.children).indexOf(placeholder);
 
                     let currentX = preDragRect.left;
-                    let currentY = preDragRect.top;
+                    let currentY = lockedY;
                     let targetX = preDragRect.left;
-                    let targetY = preDragRect.top;
+                    let targetY = lockedY;
                     let isDragging = true;
                     let isLanding = false;
                     let mouseX = e.clientX;
-                    let mouseY = e.clientY;
 
                     const finalizeDrop = () => {
                         isDragging = false;
@@ -450,9 +449,8 @@
 
                     const onMouseMove = (moveEvent) => {
                         mouseX = moveEvent.clientX;
-                        mouseY = moveEvent.clientY;
                         targetX = mouseX - initialOffsetX;
-                        targetY = mouseY - initialOffsetY;
+                        targetY = lockedY;
 
                         const gridRect = grid.getBoundingClientRect();
                         const scrollLeft = grid.scrollLeft;
@@ -513,7 +511,7 @@
 
                         const finalRect = placeholder.getBoundingClientRect();
                         targetX = finalRect.left;
-                        targetY = finalRect.top;
+                        targetY = lockedY;
                         isLanding = true;
                     };
 
@@ -663,7 +661,7 @@
         }
 
         renderTab(tab, container, wsId) {
-            const iconSrc = tab.image || tab.icon || "chrome://global/skin/icons/defaultFavicon.svg";
+            const iconSrc = this.getTabIcon(tab);
             const isPinned = tab.pinned;
 
             const itemEl = this.el("div", {
@@ -707,6 +705,14 @@
             itemEl.appendChild(closeBtn);
 
             container.appendChild(itemEl);
+        }
+
+        getTabIcon(tab) {
+            return tab.zenStaticIcon ||
+                tab.getAttribute?.("image") ||
+                tab.image ||
+                tab.icon ||
+                "chrome://global/skin/icons/defaultFavicon.svg";
         }
 
         _ensureWorkspaceMenu() {
