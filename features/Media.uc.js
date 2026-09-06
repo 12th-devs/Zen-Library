@@ -8,6 +8,8 @@
         static IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp", "tiff", "tif", "heic", "heif"];
         static VIDEO_EXTS = ["mp4", "webm", "mkv", "avi", "mov", "m4v", "3gp", "mpg", "mpeg", "flv", "ts", "ogv", "wmv"];
         static AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
+        static INITIAL_RENDER_LIMIT = 36;
+        static RENDER_BATCH_SIZE = 36;
 
         constructor(library) {
             this.library = library;
@@ -26,6 +28,10 @@
             this._scanCache = null;
             this._scanAt = 0;
             this._scanPromise = null;
+            this._renderToken = 0;
+            this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
+            this._previewObserver = null;
+            this._moreObserver = null;
 
             // [audit] LEAK-1 — every blob: URL this module hands out is recorded here so
             // destroy() can revoke it. Previously nothing was ever revoked and there was no
@@ -82,20 +88,30 @@
                 const pill = this.el("div", {
                     className: `media-filter-pill ${this._filter === f.id ? 'active' : ''}`,
                     title: f.label,
+                    dataset: { filter: f.id },
                     onclick: () => {
                         if (this._filter === f.id) return;
                         this._filter = f.id;
+                        this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
                         filterBar.querySelectorAll(".media-filter-pill").forEach(p => p.classList.remove("active"));
                         pill.classList.add("active");
                         this._stopCurrentAudio(); // STOP ON FILTER CHANGE
-                        // [audit] PERF-1 — filtering is a pure function of the list that has
-                        // already been fetched. This used to re-walk the Downloads folder on
-                        // every pill click; fetchDownloads() now serves it from the cache.
+                        const container = this._container;
+                        const token = ++this._renderToken;
+                        const cached = this._scanCache;
+                        if (cached) {
+                            this.renderList(cached);
+                            container?.classList.add("library-content-fade-in");
+                            return;
+                        }
                         this.fetchDownloads().then(downloads => {
-                            this._container.classList.remove("library-content-fade-in");
-                            void this._container.offsetWidth; // Force reflow
+                            if (!this._canRender(token, container)) return;
+                            container.classList.remove("library-content-fade-in");
+                            void container.offsetWidth; // Force reflow
                             this.renderList(downloads);
-                            this._container.classList.add("library-content-fade-in");
+                            if (this._canRender(token, container)) {
+                                container.classList.add("library-content-fade-in");
+                            }
                         });
                     }
                 }, [
@@ -116,16 +132,33 @@
             wrapper.appendChild(container);
             this._container = container;
             this.library._mediaContainer = container; // Keep ref
+            const token = ++this._renderToken;
+            // Modules outlive a close/open cycle, so a limit paged up in a previous
+            // session would otherwise render every card the user ever scrolled to.
+            this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
 
             const startLoading = () => {
                 this.fetchDownloads().then(downloads => {
+                    if (!this._canRender(token, container)) return;
+                    const l = container.querySelector(".empty-state");
+                    if (l) l.remove();
                     this.renderList(downloads);
-                    this._container.classList.add("library-content-fade-in");
-                    setTimeout(() => this._container.classList.add("scrollbar-visible"), 100);
+                    if (!this._canRender(token, container)) return;
+                    container.classList.add("library-content-fade-in");
+                    setTimeout(() => {
+                        if (this._canRender(token, container)) {
+                            container.classList.add("scrollbar-visible");
+                        }
+                    }, 100);
                 });
             };
 
-            const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
+            if (this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
+                this.renderList(this._scanCache);
+                container.classList.add("library-content-fade-in", "scrollbar-visible");
+                return wrapper;
+            }
+
             const loading = this.el("div", { className: "empty-state library-content-fade-in" });
 
             // Use correct Media Icon SVG (Film Strip)
@@ -139,15 +172,16 @@
             loading.appendChild(this.el("p", { textContent: "Looking for your downloaded images and videos." }));
 
             container.appendChild(loading);
-
-            const delay = isTransitioning ? 400 : 250;
-            setTimeout(() => {
-                const l = container.querySelector(".empty-state");
-                if (l) l.remove();
-                startLoading();
-            }, delay);
+            startLoading();
 
             return wrapper;
+        }
+
+        _canRender(token, container) {
+            return token === this._renderToken &&
+                this._container === container &&
+                this.library?.activeTab === "media" &&
+                container?.isConnected;
         }
 
         // [audit] SEC-4 — the MIME type is parsed out of the file's own metadata, so it is
@@ -318,7 +352,8 @@
         //      building a Gecko File object for every media file in Downloads on every
         //      scan, purely so that a drag *might* be instant. It is now created on demand
         //      in the dragstart handler, which is early enough.
-        static CACHE_MS = 5000;
+        // A newly downloaded file should still show up promptly, so this stays short.
+        static CACHE_MS = 15000;
 
         async fetchDownloads({ force = false } = {}) {
             if (!force && this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
@@ -387,20 +422,20 @@
                         continue;
                     }
 
-                    for (const path of children) {
+                    const inspectChild = async (path) => {
                         const name = PathUtils.filename(path);
-                        if (name.startsWith(".")) continue;
+                        if (name.startsWith(".")) return null;
 
                         let info;
                         try {
                             info = await IOUtils.stat(path);
                         } catch (e) {
-                            continue;
+                            return null;
                         }
 
                         if (info.type === "directory") {
                             next.push(path);
-                            continue;
+                            return null;
                         }
 
                         const ext = name.split(".").pop().toLowerCase();
@@ -408,7 +443,7 @@
                         if (IMAGE_EXTS.includes(ext)) contentType = "image/" + (ext === "jpg" ? "jpeg" : ext);
                         else if (VIDEO_EXTS.includes(ext)) contentType = "video/" + ext;
                         else if (AUDIO_EXTS.includes(ext)) contentType = "audio/" + ext;
-                        else continue;
+                        else return null;
 
                         // nsIFile is still what the drag path and the cover reader want, but
                         // it is now built from a path already known to be a file, so none of
@@ -418,7 +453,7 @@
                             file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
                             file.initWithPath(path);
                         } catch (e) {
-                            continue;
+                            return null;
                         }
 
                         const modified = info.lastModified || 0;
@@ -430,7 +465,7 @@
                         // dragstart handler. A Gecko File is only wanted on the fallback path
                         // for a build without mozSetDataAt, and the card's pointerdown
                         // handler covers that.
-                        mediaFiles.push({
+                        return {
                             id,
                             filename: name,
                             size: info.size || 0,
@@ -441,17 +476,26 @@
                             targetPath: path,
                             file,
                             raw: { target: { path }, lastModified: modified }
-                        });
+                        };
+                    };
+
+                    // Stat in chunks rather than one Promise.all over the whole directory:
+                    // a Downloads folder with thousands of files would otherwise queue that
+                    // many concurrent stats at once.
+                    for (let i = 0; i < children.length; i += 64) {
+                        const batch = await Promise.all(children.slice(i, i + 64).map(inspectChild));
+                        mediaFiles.push(...batch.filter(Boolean));
                     }
                 }
                 level = next;
             }
 
-            return mediaFiles;
+            return mediaFiles.sort((a, b) => b.timestamp - a.timestamp);
         }
 
         renderList(downloads) {
             if (!this._container) return;
+            this._disconnectLazyObservers();
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
 
@@ -501,8 +545,11 @@
                 return;
             }
 
-            // Sort by TS
+            // Sort by TS. The scanner also returns sorted data, but keep this here for
+            // cached/renamed/deleted paths that may update the list outside a full scan.
             mediaItems.sort((a, b) => b.timestamp - a.timestamp);
+            const visibleLimit = Math.min(this._visibleLimit || ZenLibraryMedia.INITIAL_RENDER_LIMIT, mediaItems.length);
+            const visibleItems = mediaItems.slice(0, visibleLimit);
 
             const libWidth = parseFloat(this.library.style.getPropertyValue("--zen-library-width")) || 340;
             let colCount = 1;
@@ -541,7 +588,7 @@
                 }
             };
 
-            mediaItems.forEach((item, index) => {
+            visibleItems.forEach((item, index) => {
                 const ext = item.filename.split('.').pop().toLowerCase();
                 const contentType = item.contentType.toLowerCase();
                 const isVideo = VIDEO_EXTS.includes(ext) || contentType.startsWith("video/");
@@ -716,10 +763,10 @@
 
                 if (isVideo) {
                     const videoEl = this.el("video", {
-                        src: fileUrl,
                         preload: "metadata",
                         muted: true
                     });
+                    this._observePreview(videoEl, fileUrl);
                     previewContainer.appendChild(videoEl);
 
                     const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
@@ -731,9 +778,9 @@
                     previewContainer.appendChild(durationBadge);
                 } else if (isGif) {
                     const imgEl = this.el("img", {
-                        src: fileUrl,
                         loading: "lazy",
                     });
+                    this._observePreview(imgEl, fileUrl);
                     previewContainer.appendChild(imgEl);
                     const gifBadge = this.el("div", { className: "gif-badge", textContent: "GIF" });
                     previewContainer.appendChild(gifBadge);
@@ -776,10 +823,10 @@
                     const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
 
                     const audioEl = this.el("audio", {
-                        src: fileUrl,
                         preload: "metadata",
                         style: "display: none;"
                     });
+                    this._observePreview(audioEl, fileUrl);
 
                     audioEl.addEventListener("loadedmetadata", () => {
                         const mins = Math.floor(audioEl.duration / 60);
@@ -797,9 +844,9 @@
                     previewContainer.appendChild(durationBadge);
                 } else {
                     const imgEl = this.el("img", {
-                        src: fileUrl,
                         loading: "lazy",
                     });
+                    this._observePreview(imgEl, fileUrl);
                     previewContainer.appendChild(imgEl);
                 }
 
@@ -824,6 +871,62 @@
                 // Distribute round-robin to columns
                 columns[index % colCount].appendChild(card);
             });
+
+            if (visibleLimit < mediaItems.length) {
+                const more = this.el("div", {
+                    className: "media-load-more-sentinel",
+                    "aria-hidden": "true"
+                });
+                masonryWrapper.appendChild(more);
+                this._observeMore(more, downloads);
+            }
+        }
+
+        _observeMore(sentinel, downloads) {
+            if (!sentinel || !this._container) return;
+            this._moreObserver?.disconnect();
+            this._moreObserver = new IntersectionObserver((entries) => {
+                if (!entries.some(entry => entry.isIntersecting)) return;
+                this._moreObserver?.disconnect();
+                this._moreObserver = null;
+                // renderList() empties the scroll container, which clamps scrollTop to 0
+                // and would otherwise throw the user back to the top of the grid on every
+                // batch. Captured here, before the wipe, and restored after it.
+                const prevScroll = this._container?.scrollTop || 0;
+                this._visibleLimit = (this._visibleLimit || ZenLibraryMedia.INITIAL_RENDER_LIMIT) + ZenLibraryMedia.RENDER_BATCH_SIZE;
+                requestAnimationFrame(() => {
+                    this.renderList(downloads);
+                    if (this._container) this._container.scrollTop = prevScroll;
+                });
+            }, { root: this._container, rootMargin: "350px 0px" });
+            this._moreObserver.observe(sentinel);
+        }
+
+        _observePreview(el, fileUrl) {
+            if (!el || !fileUrl) return;
+            el.dataset.src = fileUrl;
+            this._previewObserver = this._previewObserver || new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const media = entry.target;
+                    this._previewObserver?.unobserve(media);
+                    if (media.dataset.src && !media.src) {
+                        media.src = media.dataset.src;
+                    }
+                }
+            }, { root: this._container, rootMargin: "500px 0px" });
+            this._previewObserver.observe(el);
+        }
+
+        _disconnectLazyObservers() {
+            if (this._previewObserver) {
+                this._previewObserver.disconnect();
+                this._previewObserver = null;
+            }
+            if (this._moreObserver) {
+                this._moreObserver.disconnect();
+                this._moreObserver = null;
+            }
         }
 
         _ensureContextMenu() {
@@ -1008,6 +1111,7 @@
         // Modelled on Easels.destroy(), which already did this correctly.
         destroy() {
             try { this._stopCurrentAudio(); } catch (e) { }
+            this._disconnectLazyObservers();
 
             for (const url of this._objectUrls) {
                 try { URL.revokeObjectURL(url); } catch (e) { }
@@ -1019,6 +1123,7 @@
             this._durations.clear();
             this._scanCache = null;
             this._scanPromise = null;
+            this._renderToken++;
             this._container = null;
         }
     }

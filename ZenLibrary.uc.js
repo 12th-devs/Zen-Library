@@ -711,6 +711,11 @@
                 const content = this.shadowRoot.querySelector(".library-content");
                 const header = this.shadowRoot.querySelector(".library-header");
                 const tabChanged = this._lastRenderedTab !== this.activeTab;
+                // `tabChanged` alone is not enough: it only tracks what update() last ran
+                // for, not what is actually sitting in .library-content. Anything that
+                // replaces the content behind update()'s back leaves a stale tab's markup
+                // in place while the selector checks below happily find their container.
+                const contentBelongsToTab = content?.dataset?.tab === this.activeTab;
                 this._lastRenderedTab = this.activeTab;
 
                 // Header / Search Bar Logic
@@ -745,7 +750,14 @@
                                     this.downloads.fetchDownloads().then(d => this.downloads.renderList(d));
                                 }
                             } else if (tab === "media" && this.media) {
-                                this.media.fetchDownloads().then(d => this.media.renderList(d));
+                                // Search is a pure filter over the scanned list, so use
+                                // whatever the last scan produced regardless of its age
+                                // rather than re-walking Downloads mid-typing.
+                                if (this.media._scanCache) {
+                                    this.media.renderList(this.media._scanCache);
+                                } else {
+                                    this.media.fetchDownloads().then(d => this.media.renderList(d));
+                                }
                             } else if (tab === "boosts" && this.boosts) {
                                 this.boosts.renderList();
                             } else if (tab === "easels" && this.easels) {
@@ -766,6 +778,15 @@
                                 }
                                 const module = this[this.activeTab];
                                 if (module) module._searchTerm = v;
+                                // A new search is a new list, so paging starts over. Without
+                                // this the first render of the results keeps however far the
+                                // previous search had been scrolled.
+                                if (this.activeTab === "downloads" && this.downloads) {
+                                    this.downloads._visibleLimit = window.ZenLibraryDownloads?.INITIAL_RENDER_LIMIT || 50;
+                                }
+                                if (this.activeTab === "media" && this.media) {
+                                    this.media._visibleLimit = window.ZenLibraryMedia?.INITIAL_RENDER_LIMIT || 36;
+                                }
                                 this._searchDebounce();
                             }
                         });
@@ -814,25 +835,25 @@
                     needsAppend = true; // Always append correctly returned wrapper
                 }
                 else if (this.activeTab === "history" && this.history) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.history.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "downloads" && this.downloads) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.downloads.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "media" && this.media) {
-                    if (!content.querySelector(".media-grid") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".media-grid") || tabChanged || force) {
                         elToAppend = this.media.render();
                         needsAppend = true;
                     }
                 }
                 else if (this.activeTab === "boosts" && this.boosts) {
-                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                    if (!contentBelongsToTab || !content.querySelector(".library-list-container") || tabChanged || force) {
                         elToAppend = this.boosts.render();
                         needsAppend = true;
                     }
@@ -842,7 +863,7 @@
                     // section whose contents change from underneath it (a board created in
                     // another tab, a rename, a delete, a search term) while the container it
                     // lives in stays exactly where it was.
-                    if (!content.querySelector(".easel-card-grid") || tabChanged || force) {
+                    if (!contentBelongsToTab || !content.querySelector(".easel-card-grid") || tabChanged || force) {
                         elToAppend = this.easels.render();
                         needsAppend = true;
                     }
@@ -851,6 +872,7 @@
                 if (needsAppend && elToAppend) {
                     content.innerHTML = "";
                     content.appendChild(elToAppend);
+                    content.dataset.tab = this.activeTab;
                 } else if (!this[this.activeTab] && !elToAppend && tabChanged) {
                     // Fallback if module missing
                     content.innerHTML = `<div class="empty-state library-content-fade-in">
@@ -858,6 +880,7 @@
                          <h3>Feature not available</h3>
                          <p>The ${this.activeTab} module is not loaded.</p>
                        </div>`;
+                    content.dataset.tab = this.activeTab;
                 }
 
             } catch (e) {

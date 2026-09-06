@@ -31,7 +31,8 @@
 
 .media-filter-pill.active {
     opacity: 1;
-    background: var(--tab-hover-background-color);
+    background: var(--tab-background-color-selected, var(--button-background-color-active, var(--tab-selected-bgcolor, var(--tab-hover-background-color))));
+    box-shadow: var(--tab-selected-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent));
     font-weight: 600;
 }
 
@@ -43,6 +44,13 @@
     mask-repeat: no-repeat;
     mask-position: center;
     opacity: 1;
+}
+
+.media-load-more-sentinel {
+    grid-column: 1 / -1;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 

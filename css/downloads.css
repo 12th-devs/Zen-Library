@@ -12,6 +12,12 @@
     mask-image: url("chrome://browser/skin/downloads/downloads.svg");
 }
 
+.downloads-load-more-sentinel {
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .library-download-progress-item {
     display: flex;
     align-items: center;
