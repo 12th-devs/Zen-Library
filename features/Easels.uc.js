@@ -18,7 +18,6 @@
         constructor(library) {
             this.library = library;
             this._easels = [];
-            this._thumbUrls = new Map();
             this._searchTerm = "";
         }
 
@@ -167,41 +166,6 @@
             ]);
         }
 
-        // Thumbnails are optional; a board that has never been saved since thumbnails
-        // shipped simply shows the placeholder.
-        async _applyThumbnail(node, easelId) {
-            const store = this._store();
-            if (!store) return;
-
-            // [audit] LEAK-1 — this used to mint a fresh blob: URL on every render and
-            // overwrite the map entry, orphaning the previous URL with no way to revoke it.
-            // Re-rendering the section a few times leaked a 640x480 PNG per card each time,
-            // and BUG-3's fix makes the section re-render far more often than it used to.
-            //
-            // Keyed on the easel's updatedAt so a board that has actually been redrawn still
-            // picks up its new thumbnail; anything else is served from the cache.
-            const entry = this._easels.find(e => e.id === easelId);
-            const stamp = entry ? entry.updatedAt : 0;
-            const cached = this._thumbUrls.get(easelId);
-            if (cached && cached.stamp === stamp) {
-                node.style.backgroundImage = `url("${cached.url}")`;
-                node.classList.add("has-thumb");
-                return;
-            }
-
-            try {
-                const bytes = await store.readThumbnail(easelId);
-                if (!bytes) return;
-                if (cached) {
-                    try { URL.revokeObjectURL(cached.url); } catch (e) { }
-                }
-                const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
-                this._thumbUrls.set(easelId, { url, stamp });
-                node.style.backgroundImage = `url("${url}")`;
-                node.classList.add("has-thumb");
-            } catch (e) { }
-        }
-
         _empty(title, detail) {
             return this.el("div", { className: "empty-state" }, [
                 this.el("div", { className: "empty-icon easels-icon" }),
@@ -341,15 +305,6 @@
                 if (!confirmed) return;
                 await store.removeEasel(entry.id);
 
-                // See LEAK-1 in _applyThumbnail: the cache is keyed by easel id, and a
-                // deleted board has no later updatedAt to invalidate its entry, so the
-                // blob: URL would sit in the map until the window closed.
-                const cached = this._thumbUrls.get(entry.id);
-                if (cached) {
-                    try { URL.revokeObjectURL(cached.url); } catch (e) { }
-                    this._thumbUrls.delete(entry.id);
-                }
-
                 this._easels = this._easels.filter(e => e.id !== entry.id);
                 const grid = this.library.shadowRoot?.querySelector(".easel-card-grid");
                 const card = grid?.querySelector(`.easel-card[data-id="${CSS.escape(entry.id)}"]`);
@@ -360,9 +315,11 @@
                 const siblings = [...grid.querySelectorAll(".easel-card")].filter(n => n !== card);
                 await window.ZenLibraryUtil.animateCardRemove(card, { siblings });
                 if (grid.isConnected && !grid.querySelector(".easel-card:not(.easel-card-new)")) {
+                    // Branch on the search term like render() does, or the last match deleted reads as "no easels at all".
+                    const term = (this._searchTerm || "").trim();
                     grid.appendChild(this._empty(
-                        "No easels yet",
-                        "Press Ctrl+Shift+E to start one."
+                        term ? "No easels match" : "No easels yet",
+                        term ? "Try a different search." : "Press Ctrl+Shift+E to start one."
                     ));
                 }
             });
@@ -378,12 +335,6 @@
             // The popup lives in mainPopupSet, outside anything the library tears down
             // itself, so it has to be removed by hand or a reload leaves one behind.
             document.getElementById("zen-easels-context-menu")?.remove();
-
-            // Entries are { url, stamp } now, not bare strings. See _applyThumbnail.
-            for (const { url } of this._thumbUrls.values()) {
-                try { URL.revokeObjectURL(url); } catch (e) { }
-            }
-            this._thumbUrls.clear();
         }
     }
 

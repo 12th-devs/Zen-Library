@@ -25,27 +25,17 @@
   );
 }
 
-/* Zen's document-level `*:not(.no-squircles)` does not pierce this shadow
-   tree. Replicate it here so library chrome uses the same superellipse.
-   Scoped to :host: this file is also loaded as global chrome, and an
-   unscoped `*::before`/`*::after` rule would squircle Zen's circular
-   noise knob in the theme picker. */
+/* Zen's document-level `*:not(.no-squircles)` does not pierce this shadow tree, so replicate it. */
 @media (-moz-pref("layout.css.corner-shape.enabled")) {
+  /* :host-scoped because this file is also loaded as global chrome, where an unscoped rule would reach Zen's own circular controls. */
   :where(:host, :host *:not(.no-squircles)) {
     corner-shape: superellipse(var(--zen-squircle-value));
   }
 
-  :where(:host .zen-squircle-before)::before,
-  :where(:host .zen-squircle-after)::after {
-    corner-shape: superellipse(var(--zen-squircle-value));
-  }
-
-  .library-create-workspace-button,
-  .boosts-toggle,
-  .boosts-toggle-track,
-  .boosts-toggle-thumb,
-  .download-progress-bar,
-  .download-progress-fill {
+  /* True circles and capsules with no JS hook to hang .no-squircles on. */
+  :host .library-create-workspace-button,
+  :host .download-progress-bar,
+  :host .download-progress-fill {
     corner-shape: round;
   }
 }
@@ -63,7 +53,6 @@
 #zen-library-button {
   list-style-image: url("chrome://sine/content/zen-library/resources/zen-library.svg");
 }
-
 
 .zen-library-container {
   display: flex;

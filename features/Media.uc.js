@@ -75,6 +75,48 @@
 
         get el() { return this.library.el.bind(this.library); }
 
+        renderFilterBar() {
+            const filterBar = this.el("div", { className: "media-filter-bar" });
+            const filters = [
+                { id: "all", label: "All", iconClass: "icon-all" },
+                { id: "images", label: "Images", iconClass: "icon-images" },
+                { id: "videos", label: "Videos", iconClass: "icon-videos" },
+                { id: "audio", label: "Audio", iconClass: "icon-audio" }
+            ];
+
+            filters.forEach(f => {
+                const pill = this.el("div", {
+                    className: `media-filter-pill ${this._filter === f.id ? 'active' : ''}`,
+                    title: f.label,
+                    dataset: { filter: f.id },
+                    onclick: () => {
+                        if (this._filter === f.id) return;
+                        this._filter = f.id;
+                        this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
+                        filterBar.querySelectorAll(".media-filter-pill").forEach(p => p.classList.remove("active"));
+                        pill.classList.add("active");
+                        this._stopCurrentAudio(); // STOP ON FILTER CHANGE
+                        // No entrance fade: a filter swap is an in-place re-render, same as search.
+                        const container = this._container;
+                        const token = ++this._renderToken;
+                        const cached = this._scanCache;
+                        if (cached) {
+                            this.renderList(cached);
+                            return;
+                        }
+                        this.fetchDownloads().then(downloads => {
+                            if (!this._canRender(token, container)) return;
+                            this.renderList(downloads);
+                        });
+                    }
+                }, [
+                    this.el("div", { className: `icon-mask ${f.iconClass}` })
+                ]);
+                filterBar.appendChild(pill);
+            });
+            return filterBar;
+        }
+
         render() {
             // Main wrapper
             const wrapper = this.el("div", {
@@ -769,6 +811,10 @@
                     audioIconContainer.appendChild(this.el("div", { className: "progress-bar-container" }, [
                         this.el("div", { className: "progress-bar-fill" })
                     ]));
+                    audioIconContainer.appendChild(this.el("div", { className: "audio-control-overlay" }, [
+                        this.el("div", { className: "icon-mask icon-play" }),
+                        this.el("div", { className: "icon-mask icon-pause" })
+                    ]));
                     previewContainer.appendChild(audioIconContainer);
 
                     const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
@@ -802,6 +848,10 @@
                 }
 
                 card.appendChild(previewContainer);
+                card.appendChild(this.el("div", {
+                    className: "media-card-name",
+                    textContent: item.filename
+                }));
 
                 // Distribute round-robin to columns
                 columns[index % colCount].appendChild(card);

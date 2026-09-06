@@ -806,6 +806,12 @@
                             searchInput
                         ]);
                         header.appendChild(searchContainer);
+
+                        // Support for module-specific header extensions (e.g. Media filter bar)
+                        const module = this[this.activeTab];
+                        if (module && typeof module.renderFilterBar === "function") {
+                            header.appendChild(module.renderFilterBar());
+                        }
                     }
                 } else {
                     header.innerHTML = "";

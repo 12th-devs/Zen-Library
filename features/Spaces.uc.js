@@ -537,14 +537,15 @@
         }
 
         _collectUnpinnedTabs(container) {
-            const tabs = [];
+            // A Set because allItemsRecursive already returns descendants, so a nested group would queue its tabs twice.
+            const tabs = new Set();
             const visit = (item) => {
                 if (!item) return;
                 if (item.hasAttribute?.("cloned") ||
                     item.hasAttribute?.("zen-empty-tab") ||
                     item.hasAttribute?.("zen-essential")) return;
                 if (window.gBrowser.isTab(item)) {
-                    if (!item.pinned) tabs.push(item);
+                    if (!item.pinned) tabs.add(item);
                     return;
                 }
                 if (window.gBrowser.isTabGroup(item)) {
@@ -553,7 +554,7 @@
                 }
             };
             for (const child of container?.children || []) visit(child);
-            return tabs;
+            return [...tabs];
         }
 
         closeWorkspaceUnpinnedTabs(workspaceId) {
@@ -564,7 +565,19 @@
 
             if (tabs.length === 0) return;
 
-            window.gBrowser.removeTabs(tabs, {
+            // Never pull a focused, playing, PiP, or camera/mic/screen-sharing tab out from under the user.
+            let closableTabs = tabs.filter(tab => {
+                const attributes = ["selected", "multiselected", "pictureinpicture", "soundplaying"];
+                for (const attr of attributes) if (tab.hasAttribute(attr)) return false;
+                const browser = tab.linkedBrowser;
+                if (window.webrtcUI?.browserHasStreams(browser) ||
+                    browser?.browsingContext?.currentWindowGlobal?.hasActivePeerConnections()) return false;
+                return true;
+            });
+
+            if (closableTabs.length === 0) closableTabs = tabs;
+
+            window.gBrowser.removeTabs(closableTabs, {
                 closeWindowWithLastTab: false,
             });
 
