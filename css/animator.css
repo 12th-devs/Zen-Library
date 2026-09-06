@@ -32,6 +32,15 @@
   transform: translateX(var(--zen-library-offset, 0px)) !important;
   transition-delay: 0.1s !important;
 }
+:root[zen-library-dragging="true"] zen-library,
+:root[zen-library-dragging="true"] #zen-library-container {
+  translate: calc(-1 * var(--zen-library-offset, 0px)) 0;
+  transition-delay: 0s, 0.1s !important;
+}
+:root[zen-right-side="true"][zen-library-dragging="true"] zen-library,
+:root[zen-right-side="true"][zen-library-dragging="true"] #zen-library-container {
+  translate: var(--zen-library-offset, 0px) 0;
+}
 #zen-tabbox-wrapper {
   transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
@@ -49,7 +58,7 @@
 zen-library,
 #zen-library-container {
   opacity: 1;
-  transition: opacity 0.12s ease !important;
+  transition: opacity 0.12s ease, translate 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 :root:has(.zen-glance-overlay:not([fade-out="true"])) #zen-library-container {
   opacity: 0.4 !important;

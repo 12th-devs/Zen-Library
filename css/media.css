@@ -8,7 +8,7 @@
     margin: 4px 16px 8px 16px;
     flex-shrink: 0;
     background: var(--zen-toolbar-element-bg);
-    border-radius: 8px;
+    border-radius: var(--border-radius-medium);
 }
 
 .media-filter-pill {
@@ -17,7 +17,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: var(--border-radius-medium);
     cursor: pointer;
     transition: all 0.2s var(--zen-library-easing);
     opacity: 0.8;
@@ -26,13 +26,12 @@
 
 .media-filter-pill:hover {
     opacity: 0.9;
-    background: var(--tab-hover-background-color);
+    background: var(--zen-toolbar-element-bg-hover);
 }
 
 .media-filter-pill.active {
     opacity: 1;
-    background: var(--tab-background-color-selected, var(--button-background-color-active, var(--tab-selected-bgcolor, var(--tab-hover-background-color))));
-    box-shadow: var(--tab-selected-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent));
+    background: var(--zen-toolbar-element-bg-hover);
     font-weight: 600;
 }
 

@@ -37,6 +37,13 @@
             // destroy() can revoke it. Previously nothing was ever revoked and there was no
             // destroy() at all, so cover art accumulated for the lifetime of the window.
             this._objectUrls = new Set();
+
+            this._dragCancelArmed = false;
+            this._onDragCancelEvent = this._onDragCancelEvent.bind(this);
+            this._onSuppressContextMenu = this._onSuppressContextMenu.bind(this);
+            this._contextMenuSuppressArmed = false;
+            this._contextMenuSuppressTimer = null;
+            this._suppressContextMenuUntil = 0;
         }
 
         // [audit] LEAK-1 — one place that mints blob URLs, so one place has to remember them.
@@ -610,6 +617,7 @@
                     ondragstart: (e) => {
                         // Reset webview position during drag
                         document.documentElement.setAttribute("zen-library-dragging", "true");
+                        this._armDragCancel();
 
                         try {
                             if (!item.file || !item.file.exists()) return;
@@ -738,10 +746,15 @@
                     ondragend: (e) => {
                         document.documentElement.removeAttribute("zen-library-dragging");
                         card.classList.remove("dragging");
+                        this._disarmDragCancel();
                     },
                     oncontextmenu: (e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        if (document.documentElement.hasAttribute("zen-library-dragging")) {
+                            this._cancelActiveDrag();
+                            return;
+                        }
                         this._showContextMenu(e, item);
                     },
                     onclick: (e) => {
@@ -911,6 +924,244 @@
             if (this._moreObserver) {
                 this._moreObserver.disconnect();
                 this._moreObserver = null;
+            }
+        }
+
+        _armDragCancel() {
+            if (this._dragCancelArmed) return;
+            this._dragCancelArmed = true;
+            this._dragWasCancelled = false;
+            // `drag` fires on the chrome source even when the cursor is over the
+            // easel webview, which is where a right-click would otherwise be lost.
+            window.addEventListener("drag", this._onDragCancelEvent, true);
+            window.addEventListener("dragover", this._onDragCancelEvent, true);
+            window.addEventListener("drop", this._onDragCancelEvent, true);
+            window.addEventListener("contextmenu", this._onDragCancelEvent, true);
+            window.addEventListener("pointerdown", this._onDragCancelEvent, true);
+        }
+
+        _disarmDragCancel() {
+            if (!this._dragCancelArmed && !this._dragWasCancelled) return;
+            this._dragCancelArmed = false;
+            this._dragWasCancelled = false;
+            window.removeEventListener("drag", this._onDragCancelEvent, true);
+            window.removeEventListener("dragover", this._onDragCancelEvent, true);
+            window.removeEventListener("drop", this._onDragCancelEvent, true);
+            window.removeEventListener("contextmenu", this._onDragCancelEvent, true);
+            window.removeEventListener("pointerdown", this._onDragCancelEvent, true);
+        }
+
+        _armContextMenuSuppress() {
+            this._suppressContextMenuUntil = Date.now() + 500;
+            if (!this._contextMenuSuppressArmed) {
+                this._contextMenuSuppressArmed = true;
+                window.addEventListener("contextmenu", this._onSuppressContextMenu, true);
+                document.addEventListener("popupshowing", this._onSuppressContextMenu, true);
+                try {
+                    window.gBrowser?.selectedBrowser?.addEventListener("contextmenu", this._onSuppressContextMenu, true);
+                } catch (_) {}
+            }
+            this._hideOpenContextMenus();
+            if (this._contextMenuSuppressTimer) clearTimeout(this._contextMenuSuppressTimer);
+            this._contextMenuSuppressTimer = setTimeout(() => this._disarmContextMenuSuppress(), 500);
+        }
+
+        _disarmContextMenuSuppress() {
+            if (this._contextMenuSuppressTimer) {
+                clearTimeout(this._contextMenuSuppressTimer);
+                this._contextMenuSuppressTimer = null;
+            }
+            if (!this._contextMenuSuppressArmed) return;
+            this._contextMenuSuppressArmed = false;
+            this._suppressContextMenuUntil = 0;
+            window.removeEventListener("contextmenu", this._onSuppressContextMenu, true);
+            document.removeEventListener("popupshowing", this._onSuppressContextMenu, true);
+            try {
+                window.gBrowser?.selectedBrowser?.removeEventListener("contextmenu", this._onSuppressContextMenu, true);
+            } catch (_) {}
+        }
+
+        _onSuppressContextMenu(e) {
+            if (Date.now() > this._suppressContextMenuUntil) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (e.type === "popupshowing") {
+                try { e.target.hidePopup?.(); } catch (_) {}
+            }
+            this._hideOpenContextMenus();
+        }
+
+        _hideOpenContextMenus() {
+            for (const id of ["contentAreaContextMenu", "zen-media-context-menu"]) {
+                try { document.getElementById(id)?.hidePopup?.(); } catch (_) {}
+            }
+        }
+
+        _isEaselTab(tab) {
+            try {
+                const spec = (tab?.linkedBrowser?.currentURI?.spec || "").toLowerCase();
+                return spec.startsWith("about:easel") || spec.includes("zen-easel");
+            } catch (_) {
+                return false;
+            }
+        }
+
+        _isEmptyTab(tab) {
+            if (!tab) return false;
+            if (tab.hasAttribute?.("zen-empty-tab")) return true;
+            try {
+                const spec = (tab.linkedBrowser?.currentURI?.spec || "").toLowerCase();
+                return spec === "about:blank" || spec === "about:newtab" ||
+                    spec === "about:home" || spec === "about:privatebrowsing";
+            } catch (_) {
+                return false;
+            }
+        }
+
+        _isAllowedMediaDropTab(tab) {
+            return this._isEaselTab(tab) || this._isEmptyTab(tab);
+        }
+
+        _tabFromEvent(e) {
+            for (const n of this._eventPath(e)) {
+                if (!n || n.nodeType !== 1) continue;
+                if (n.matches?.(".tabbrowser-tab") || (n.localName === "tab" && n.classList?.contains("tabbrowser-tab"))) {
+                    return n;
+                }
+            }
+            try {
+                return e.target?.closest?.(".tabbrowser-tab") || null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        _eventPath(e) {
+            try {
+                return e.composedPath?.() || [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        _isOverTabChrome(e) {
+            for (const n of this._eventPath(e)) {
+                if (!n || n.nodeType !== 1) continue;
+                if (n.matches?.(".tabbrowser-tab") || (n.localName === "tab" && n.classList?.contains("tabbrowser-tab"))) {
+                    return true;
+                }
+                if (n.hasAttribute?.("zen-essential")) return true;
+                if (n.id === "tabbrowser-tabs" || n.id === "TabsToolbar" || n.id === "navigator-toolbox") {
+                    return true;
+                }
+                if (n.id === "vertical-pinned-tabs-container" || n.id === "pinned-tabs-container") {
+                    return true;
+                }
+            }
+            try {
+                return !!e.target?.closest?.(
+                    ".tabbrowser-tab, #tabbrowser-tabs, #TabsToolbar, #navigator-toolbox, #vertical-pinned-tabs-container, #pinned-tabs-container, [zen-essential]"
+                );
+            } catch (_) {
+                return false;
+            }
+        }
+
+        _isOverNonEaselBrowser(e) {
+            let overBrowser = false;
+            for (const n of this._eventPath(e)) {
+                if (!n || n.nodeType !== 1) continue;
+                if (n.id === "tabbrowser-tabpanels" || n.id === "tabbrowser-tabbox" ||
+                    n.id === "zen-tabbox-wrapper" || n.localName === "browser" ||
+                    n.classList?.contains("browserSidebarContainer")) {
+                    overBrowser = true;
+                    break;
+                }
+            }
+            if (!overBrowser) {
+                try {
+                    overBrowser = !!e.target?.closest?.("#tabbrowser-tabbox, #zen-tabbox-wrapper, #tabbrowser-tabpanels");
+                } catch (_) {}
+            }
+            if (!overBrowser) return false;
+            return !this._isAllowedMediaDropTab(window.gBrowser?.selectedTab);
+        }
+
+        _shouldRejectMediaDrop(e) {
+            const tab = this._tabFromEvent(e);
+            if (tab) return !this._isAllowedMediaDropTab(tab);
+            return this._isOverTabChrome(e) || this._isOverNonEaselBrowser(e);
+        }
+
+        _rejectMediaDrop(e) {
+            if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+
+        _onDragCancelEvent(e) {
+            if (e.type === "drop" && this._dragWasCancelled) {
+                this._rejectMediaDrop(e);
+                return;
+            }
+            if (e.type === "dragover" && this._dragWasCancelled) {
+                this._rejectMediaDrop(e);
+                return;
+            }
+            if (!document.documentElement.hasAttribute("zen-library-dragging")) return;
+
+            if (e.type === "dragover" && this._shouldRejectMediaDrop(e)) {
+                this._rejectMediaDrop(e);
+                return;
+            }
+            if (e.type === "drop" && this._shouldRejectMediaDrop(e)) {
+                this._rejectMediaDrop(e);
+                this._cancelActiveDrag();
+                return;
+            }
+
+            if (e.type !== "contextmenu" && e.button !== 2 && !(e.buttons & 2)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this._cancelActiveDrag();
+        }
+
+        _cancelActiveDrag() {
+            if (this._dragWasCancelled) return;
+            this._dragWasCancelled = true;
+            // dragend runs inside endDragSession and would drop the drag listeners
+            // before the easel's contextmenu arrives — keep a separate suppress.
+            this._armContextMenuSuppress();
+            document.documentElement.removeAttribute("zen-library-dragging");
+            this._container?.querySelectorAll(".media-card.dragging").forEach(c => {
+                c.classList.remove("dragging");
+            });
+            try {
+                const dragService = Cc["@mozilla.org/widget/dragservice;1"].getService(Ci.nsIDragService);
+                let session = null;
+                try {
+                    session = dragService.getCurrentSession(window);
+                } catch (_) {
+                    try { session = dragService.getCurrentSession(); } catch (_) {}
+                }
+                if (session) {
+                    // endDragSession(false) means "left the window", not cancel — that
+                    // still lets the easel receive the drop. Mark the user cancel, clear
+                    // the effect, then end the session as finished.
+                    if (typeof session.userCancelled === "function") session.userCancelled();
+                    try { session.canDrop = false; } catch (_) {}
+                    try { session.dragAction = Ci.nsIDragService.DRAGDROP_ACTION_NONE; } catch (_) {}
+                    try {
+                        if (session.dataTransfer) session.dataTransfer.dropEffect = "none";
+                    } catch (_) {}
+                    if (typeof session.endDragSession === "function") {
+                        session.endDragSession(true);
+                    } else if (typeof dragService.endDragSession === "function") {
+                        dragService.endDragSession(true);
+                    }
+                }
+            } catch (err) {
+                console.warn("[ZenLibrary Media] Failed to cancel drag:", err);
             }
         }
 
@@ -1102,6 +1353,9 @@
         // Modelled on Easels.destroy(), which already did this correctly.
         destroy() {
             try { this._stopCurrentAudio(); } catch (e) { }
+            this._disarmDragCancel();
+            this._disarmContextMenuSuppress();
+            document.documentElement.removeAttribute("zen-library-dragging");
             this._disconnectLazyObservers();
 
             for (const url of this._objectUrls) {
