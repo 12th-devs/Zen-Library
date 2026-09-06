@@ -1,6 +1,13 @@
 "use strict";
 
 (function () {
+    // Window-capture types armed for the duration of a media-card drag, listed once so arm and
+    // disarm cannot drift apart and leave a listener behind.
+    const DRAG_CANCEL_EVENTS = ["drag", "dragover", "drop", "contextmenu", "pointerdown"];
+    // How long a cancelled drag keeps vetoing drops, and how long the platform context menu
+    // stays suppressed after that cancel. Both bound the blast radius if dragend never arrives.
+    const DRAG_CANCEL_GRACE_MS = 500;
+
     class ZenLibraryMedia {
         // [audit] PERF-1 — hoisted to statics. These three lists were declared as locals in
         // both fetchDownloads() and renderList(), which meant six array literals rebuilt on
@@ -39,11 +46,14 @@
             this._objectUrls = new Set();
 
             this._dragCancelArmed = false;
+            this._dragWasCancelled = false;
+            this._dragCancelledAt = 0;
             this._onDragCancelEvent = this._onDragCancelEvent.bind(this);
             this._onSuppressContextMenu = this._onSuppressContextMenu.bind(this);
             this._contextMenuSuppressArmed = false;
             this._contextMenuSuppressTimer = null;
             this._suppressContextMenuUntil = 0;
+            this._suppressBrowser = null;
         }
 
         // [audit] LEAK-1 — one place that mints blob URLs, so one place has to remember them.
@@ -499,6 +509,10 @@
 
         renderList(downloads) {
             if (!this._container) return;
+            // Emptying the container disconnects the drag source, and a disconnected source
+            // never gets its dragend — so the arm/disarm pair has to be balanced here instead.
+            this._disarmDragCancel();
+            document.documentElement.removeAttribute("zen-library-dragging");
             this._disconnectLazyObservers();
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
@@ -928,42 +942,58 @@
         }
 
         _armDragCancel() {
+            // Reset before the armed-guard, never after: dragend is NOT dispatched when the
+            // source node is disconnected (Firefox asserts exactly this in EventUtils.js), and
+            // renderList()/close() disconnect cards routinely. Leaving a stale _dragWasCancelled
+            // here made the next drag start pre-cancelled and rejected every drop window-wide.
+            this._dragWasCancelled = false;
+            this._dragCancelledAt = 0;
             if (this._dragCancelArmed) return;
             this._dragCancelArmed = true;
-            this._dragWasCancelled = false;
             // `drag` fires on the chrome source even when the cursor is over the
             // easel webview, which is where a right-click would otherwise be lost.
-            window.addEventListener("drag", this._onDragCancelEvent, true);
-            window.addEventListener("dragover", this._onDragCancelEvent, true);
-            window.addEventListener("drop", this._onDragCancelEvent, true);
-            window.addEventListener("contextmenu", this._onDragCancelEvent, true);
-            window.addEventListener("pointerdown", this._onDragCancelEvent, true);
+            for (const type of DRAG_CANCEL_EVENTS) {
+                window.addEventListener(type, this._onDragCancelEvent, true);
+            }
         }
 
         _disarmDragCancel() {
-            if (!this._dragCancelArmed && !this._dragWasCancelled) return;
-            this._dragCancelArmed = false;
             this._dragWasCancelled = false;
-            window.removeEventListener("drag", this._onDragCancelEvent, true);
-            window.removeEventListener("dragover", this._onDragCancelEvent, true);
-            window.removeEventListener("drop", this._onDragCancelEvent, true);
-            window.removeEventListener("contextmenu", this._onDragCancelEvent, true);
-            window.removeEventListener("pointerdown", this._onDragCancelEvent, true);
+            this._dragCancelledAt = 0;
+            if (!this._dragCancelArmed) return;
+            this._dragCancelArmed = false;
+            for (const type of DRAG_CANCEL_EVENTS) {
+                window.removeEventListener(type, this._onDragCancelEvent, true);
+            }
+        }
+
+        // The cancel latch only makes sense while the session it cancelled is still winding
+        // down. Bounding it means that even if dragend never arrives, the listeners degrade to
+        // a cheap attribute check instead of vetoing every drop in the window forever.
+        _isCancelLatchLive() {
+            return this._dragWasCancelled &&
+                Date.now() - this._dragCancelledAt < DRAG_CANCEL_GRACE_MS;
         }
 
         _armContextMenuSuppress() {
-            this._suppressContextMenuUntil = Date.now() + 500;
+            this._suppressContextMenuUntil = Date.now() + DRAG_CANCEL_GRACE_MS;
             if (!this._contextMenuSuppressArmed) {
                 this._contextMenuSuppressArmed = true;
                 window.addEventListener("contextmenu", this._onSuppressContextMenu, true);
                 document.addEventListener("popupshowing", this._onSuppressContextMenu, true);
+                // Hold the browser we armed. Disarming off a re-read of selectedBrowser would
+                // detach from whichever tab is current 500ms later and leak this listener onto
+                // the original one for the life of the window.
                 try {
-                    window.gBrowser?.selectedBrowser?.addEventListener("contextmenu", this._onSuppressContextMenu, true);
-                } catch (_) {}
+                    this._suppressBrowser = window.gBrowser?.selectedBrowser || null;
+                    this._suppressBrowser?.addEventListener("contextmenu", this._onSuppressContextMenu, true);
+                } catch (_) {
+                    this._suppressBrowser = null;
+                }
             }
             this._hideOpenContextMenus();
             if (this._contextMenuSuppressTimer) clearTimeout(this._contextMenuSuppressTimer);
-            this._contextMenuSuppressTimer = setTimeout(() => this._disarmContextMenuSuppress(), 500);
+            this._contextMenuSuppressTimer = setTimeout(() => this._disarmContextMenuSuppress(), DRAG_CANCEL_GRACE_MS);
         }
 
         _disarmContextMenuSuppress() {
@@ -977,12 +1007,16 @@
             window.removeEventListener("contextmenu", this._onSuppressContextMenu, true);
             document.removeEventListener("popupshowing", this._onSuppressContextMenu, true);
             try {
-                window.gBrowser?.selectedBrowser?.removeEventListener("contextmenu", this._onSuppressContextMenu, true);
+                this._suppressBrowser?.removeEventListener("contextmenu", this._onSuppressContextMenu, true);
             } catch (_) {}
+            this._suppressBrowser = null;
         }
 
         _onSuppressContextMenu(e) {
             if (Date.now() > this._suppressContextMenuUntil) return;
+            // Scoped to menus. An unscoped popupshowing veto also swallowed the urlbar results
+            // panel, notification anchors and tooltips for the whole suppression window.
+            if (e.type === "popupshowing" && e.target?.localName !== "menupopup") return;
             e.preventDefault();
             e.stopImmediatePropagation();
             if (e.type === "popupshowing") {
@@ -1000,7 +1034,11 @@
         _isEaselTab(tab) {
             try {
                 const spec = (tab?.linkedBrowser?.currentURI?.spec || "").toLowerCase();
-                return spec.startsWith("about:easel") || spec.includes("zen-easel");
+                // Anchored to the scheme on purpose. A bare `includes("zen-easel")` also matched
+                // https://evil.example/zen-easel, so any page could advertise itself as a valid
+                // drop target and receive the file:// path and File for a dragged media item.
+                return spec.startsWith("about:easel") ||
+                    spec.startsWith("chrome://sine/content/zen-easel");
             } catch (_) {
                 return false;
             }
@@ -1022,20 +1060,6 @@
             return this._isEaselTab(tab) || this._isEmptyTab(tab);
         }
 
-        _tabFromEvent(e) {
-            for (const n of this._eventPath(e)) {
-                if (!n || n.nodeType !== 1) continue;
-                if (n.matches?.(".tabbrowser-tab") || (n.localName === "tab" && n.classList?.contains("tabbrowser-tab"))) {
-                    return n;
-                }
-            }
-            try {
-                return e.target?.closest?.(".tabbrowser-tab") || null;
-            } catch (_) {
-                return null;
-            }
-        }
-
         _eventPath(e) {
             try {
                 return e.composedPath?.() || [];
@@ -1044,33 +1068,34 @@
             }
         }
 
-        _isOverTabChrome(e) {
-            for (const n of this._eventPath(e)) {
-                if (!n || n.nodeType !== 1) continue;
-                if (n.matches?.(".tabbrowser-tab") || (n.localName === "tab" && n.classList?.contains("tabbrowser-tab"))) {
-                    return true;
-                }
-                if (n.hasAttribute?.("zen-essential")) return true;
-                if (n.id === "tabbrowser-tabs" || n.id === "TabsToolbar" || n.id === "navigator-toolbox") {
-                    return true;
-                }
-                if (n.id === "vertical-pinned-tabs-container" || n.id === "pinned-tabs-container") {
-                    return true;
-                }
-            }
-            try {
-                return !!e.target?.closest?.(
-                    ".tabbrowser-tab, #tabbrowser-tabs, #TabsToolbar, #navigator-toolbox, #vertical-pinned-tabs-container, #pinned-tabs-container, [zen-essential]"
-                );
-            } catch (_) {
-                return false;
-            }
+        _isTabNode(n) {
+            return n.matches?.(".tabbrowser-tab") ||
+                (n.localName === "tab" && n.classList?.contains("tabbrowser-tab"));
         }
 
-        _isOverNonEaselBrowser(e) {
+        // One pass over one composedPath, classifying as it goes. This runs on every dragover,
+        // which Gecko fires per mouse move — the previous shape walked the path three times and
+        // then re-walked the ancestors again with closest() as a fallback that, since
+        // composedPath already contains every ancestor, could not match anything new.
+        _classifyDropTarget(e) {
+            let tab = null;
+            let overTabChrome = false;
             let overBrowser = false;
+
             for (const n of this._eventPath(e)) {
                 if (!n || n.nodeType !== 1) continue;
+
+                if (this._isTabNode(n)) {
+                    tab = n;
+                    break;
+                }
+                if (n.hasAttribute?.("zen-essential") ||
+                    n.id === "tabbrowser-tabs" || n.id === "TabsToolbar" ||
+                    n.id === "navigator-toolbox" ||
+                    n.id === "vertical-pinned-tabs-container" || n.id === "pinned-tabs-container") {
+                    overTabChrome = true;
+                    break;
+                }
                 if (n.id === "tabbrowser-tabpanels" || n.id === "tabbrowser-tabbox" ||
                     n.id === "zen-tabbox-wrapper" || n.localName === "browser" ||
                     n.classList?.contains("browserSidebarContainer")) {
@@ -1078,19 +1103,16 @@
                     break;
                 }
             }
-            if (!overBrowser) {
-                try {
-                    overBrowser = !!e.target?.closest?.("#tabbrowser-tabbox, #zen-tabbox-wrapper, #tabbrowser-tabpanels");
-                } catch (_) {}
-            }
-            if (!overBrowser) return false;
-            return !this._isAllowedMediaDropTab(window.gBrowser?.selectedTab);
+
+            return { tab, overTabChrome, overBrowser };
         }
 
         _shouldRejectMediaDrop(e) {
-            const tab = this._tabFromEvent(e);
+            const { tab, overTabChrome, overBrowser } = this._classifyDropTarget(e);
             if (tab) return !this._isAllowedMediaDropTab(tab);
-            return this._isOverTabChrome(e) || this._isOverNonEaselBrowser(e);
+            if (overTabChrome) return true;
+            if (overBrowser) return !this._isAllowedMediaDropTab(window.gBrowser?.selectedTab);
+            return false;
         }
 
         _rejectMediaDrop(e) {
@@ -1100,11 +1122,7 @@
         }
 
         _onDragCancelEvent(e) {
-            if (e.type === "drop" && this._dragWasCancelled) {
-                this._rejectMediaDrop(e);
-                return;
-            }
-            if (e.type === "dragover" && this._dragWasCancelled) {
+            if ((e.type === "drop" || e.type === "dragover") && this._isCancelLatchLive()) {
                 this._rejectMediaDrop(e);
                 return;
             }
@@ -1129,6 +1147,7 @@
         _cancelActiveDrag() {
             if (this._dragWasCancelled) return;
             this._dragWasCancelled = true;
+            this._dragCancelledAt = Date.now();
             // dragend runs inside endDragSession and would drop the drag listeners
             // before the easel's contextmenu arrives — keep a separate suppress.
             this._armContextMenuSuppress();
@@ -1148,7 +1167,11 @@
                     // endDragSession(false) means "left the window", not cancel — that
                     // still lets the easel receive the drop. Mark the user cancel, clear
                     // the effect, then end the session as finished.
-                    if (typeof session.userCancelled === "function") session.userCancelled();
+                    //
+                    // userCancelled is a boolean attribute on nsIDragSession, not a method, so
+                    // the previous `typeof === "function"` guard was never true and this step
+                    // silently never ran.
+                    try { session.userCancelled = true; } catch (_) {}
                     try { session.canDrop = false; } catch (_) {}
                     try { session.dragAction = Ci.nsIDragService.DRAGDROP_ACTION_NONE; } catch (_) {}
                     try {

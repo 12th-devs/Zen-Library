@@ -1735,6 +1735,12 @@
             if (this._modules.media && typeof this._modules.media._stopCurrentAudio === "function") {
                 this._modules.media._stopCurrentAudio();
             }
+            // close() drops the element without running destroy(), so a drag still in flight
+            // would leave Media's window-capture listeners armed against a source node that is
+            // about to be disconnected — and a disconnected source never fires dragend.
+            if (typeof this._modules.media?._disarmDragCancel === "function") {
+                try { this._modules.media._disarmDragCancel(); } catch (e) { }
+            }
             const el = this._element;
             this._isTransitioning = true;
             this._isOpen = false;
