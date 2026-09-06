@@ -124,7 +124,7 @@
                 }
             };
 
-            grid.classList.add("library-content-fade-in");
+            this.library.enterContent(grid);
 
             // Restore scroll position
             if (oldScroll > 0) {
@@ -536,26 +536,35 @@
             }
         }
 
+        _collectUnpinnedTabs(container) {
+            const tabs = [];
+            const visit = (item) => {
+                if (!item) return;
+                if (item.hasAttribute?.("cloned") ||
+                    item.hasAttribute?.("zen-empty-tab") ||
+                    item.hasAttribute?.("zen-essential")) return;
+                if (window.gBrowser.isTab(item)) {
+                    if (!item.pinned) tabs.push(item);
+                    return;
+                }
+                if (window.gBrowser.isTabGroup(item)) {
+                    const children = item.allItemsRecursive || item.allItems || item.tabs || [];
+                    for (const child of children) visit(child);
+                }
+            };
+            for (const child of container?.children || []) visit(child);
+            return tabs;
+        }
+
         closeWorkspaceUnpinnedTabs(workspaceId) {
             const wsEl = window.gZenWorkspaces.workspaceElement(workspaceId);
-            const tabs = Array.from(wsEl?.tabsContainer?.children || []).filter(child =>
-                window.gBrowser.isTab(child) && !child.hasAttribute("zen-essential")
-            );
+            // Same unpinned section the card draws from. Direct children can be
+            // folders or split views, so we walk those instead of only isTab.
+            const tabs = this._collectUnpinnedTabs(wsEl?.tabsContainer);
 
             if (tabs.length === 0) return;
 
-            let closableTabs = tabs.filter(tab => {
-                const attributes = ["selected", "multiselected", "pictureinpicture", "soundplaying"];
-                for (const attr of attributes) if (tab.hasAttribute(attr)) return false;
-                const browser = tab.linkedBrowser;
-                if (window.webrtcUI?.browserHasStreams(browser) ||
-                    browser?.browsingContext?.currentWindowGlobal?.hasActivePeerConnections()) return false;
-                return true;
-            });
-
-            if (closableTabs.length === 0) closableTabs = tabs;
-
-            window.gBrowser.removeTabs(closableTabs, {
+            window.gBrowser.removeTabs(tabs, {
                 closeWindowWithLastTab: false,
             });
 

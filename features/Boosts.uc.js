@@ -133,23 +133,23 @@
                     this._stale = false;
                     this.fetchBoosts().then(() => {
                         this.renderList();
-                        container.classList.add("library-content-fade-in");
+                        this.library.enterContent(container);
                         setTimeout(() => container.classList.add("scrollbar-visible"), 100);
                     });
                 } else {
                     this.renderList();
                 }
-                container.classList.add("library-content-fade-in");
+                this.library.enterContent(container);
                 setTimeout(() => container.classList.add("scrollbar-visible"), 100);
                 return wrapper;
             }
 
             // Show loading state while fetching
-            container.appendChild(this.el("div", { className: "empty-state library-content-fade-in" }, [
+            container.appendChild(this.library.enterContent(this.el("div", { className: "empty-state" }, [
                 this.el("div", { className: "empty-icon boosts-icon" }),
                 this.el("h3", { textContent: "Loading boosts..." }),
                 this.el("p", { textContent: "Gathering your site boosts." })
-            ]));
+            ])));
 
             const delay = (window.gZenLibrary && window.gZenLibrary._isTransitioning) ? 400 : 200;
             setTimeout(() => {
@@ -157,7 +157,7 @@
                     this._initialized = true;
                     container.innerHTML = "";
                     this.renderList();
-                    container.classList.add("library-content-fade-in");
+                    this.library.enterContent(container);
                     setTimeout(() => container.classList.add("scrollbar-visible"), 100);
                 });
             }, delay);
@@ -348,12 +348,12 @@
         }
 
         _createToggle(checked, onToggle) {
-            const toggle = this.el("div", { className: "boosts-toggle" });
+            const toggle = this.el("div", { className: "boosts-toggle no-squircles" });
             toggle.setAttribute("checked", checked ? "true" : "false");
 
-            const track = this.el("div", { className: "boosts-toggle-track" });
+            const track = this.el("div", { className: "boosts-toggle-track no-squircles" });
             const thumb = this.el("div", {
-                className: "boosts-toggle-thumb",
+                className: "boosts-toggle-thumb no-squircles",
                 style: `transform: translateX(${checked ? 14 : 0}px);`
             });
             track.appendChild(thumb);

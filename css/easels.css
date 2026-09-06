@@ -1,8 +1,4 @@
-/* Zen Library — Easels section.
- *
- * A card grid rather than the list every other section uses: an easel is a picture, and
- * a thumbnail identifies one far faster than its title does.
- */
+/* Zen Library — Easels section. */
 
 .easel-card-grid {
   position: absolute;
@@ -11,7 +7,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
   gap: 18px;
-  padding: 16px 18px 12px 18px;
+  padding: 12px 18px 12px 18px;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -25,35 +21,53 @@
 
 .easel-card {
   --easel-card-radius: var(--border-radius-medium, 8px);
+  --easel-card-pad: 12px;
+  --easel-card-frame: 4px;
   position: relative;
   aspect-ratio: 1;
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-  padding: 0;
+  overflow: visible;
+  display: flex;
+  padding: var(--easel-card-pad);
   border: none;
   border-radius: var(--easel-card-radius);
-  background-color: var(--zen-toolbar-element-bg, rgba(128, 128, 128, 0.10));
-  background-size: cover;
-  background-position: top center;
-  background-repeat: no-repeat;
+  background: var(--zen-toolbar-element-bg, var(--zen-library-hover-bg, rgba(128, 128, 128, 0.14)));
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: box-shadow 0.2s ease;
+  box-sizing: border-box;
 }
 
-.easel-card:not(.easel-card-new) {
-  clip-path: inset(0 round var(--easel-card-radius));
+.easel-card-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  padding: var(--easel-card-frame);
+  border-radius: calc(var(--easel-card-radius) - 2px);
+  background: light-dark(#ffffff, #3c3c3c);
+  box-sizing: border-box;
 }
 
-.easel-card.has-thumb {
-  background-color: transparent;
+.easel-card-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px 14px 12px;
+  border-radius: calc(var(--easel-card-radius) - 5px);
+  background: light-dark(#e8e8e8, #2a2a2a);
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.easel-card:hover:not(.easel-card-new) {
-  box-shadow: inset 0 0 0 100vmax rgba(0, 0, 0, 0.4);
+.easel-card:hover:not(.easel-card-new) .easel-card-body {
+  background: light-dark(#dedede, #323232);
 }
 
 .easel-card:focus-visible {
@@ -67,53 +81,60 @@
   padding: 0;
 }
 
-.easel-card-info {
+.easel-card-count {
   position: absolute;
-  bottom: -1px;
-  left: -1px;
-  right: -1px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: light-dark(
-    color-mix(in srgb, var(--zen-primary-color, #3b82f6), white 70%),
-    color-mix(in srgb, var(--zen-primary-color, #3b82f6), black 40%)
-  );
-  color: inherit;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: transform 0.2s var(--zen-library-easing, ease),
-              opacity 0.2s var(--zen-library-easing, ease);
-  pointer-events: none;
-  z-index: 2;
-  border-radius: 0 0 var(--easel-card-radius) var(--easel-card-radius);
+  top: 12px;
+  right: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.5;
+  line-height: 1;
 }
 
-.easel-card:hover .easel-card-info {
-  opacity: 1;
-  transform: translateY(0);
+.easel-card-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding-right: 28px;
+}
+
+.easel-card-mark {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  color: var(--zen-folder-stroke, var(--zen-primary-color, currentColor));
+}
+
+.easel-card-squiggle {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .easel-card-title {
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
+  width: 100%;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.easel-card-meta {
-  font-size: 10px;
-  opacity: 0.8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 
 .easel-card-new {
-  background-color: transparent;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
   border: 2px dashed color-mix(in srgb, currentColor 50%, transparent);
   box-sizing: border-box;
   line-height: 1;

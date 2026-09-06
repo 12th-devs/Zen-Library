@@ -105,7 +105,7 @@
 
             const startLoading = () => {
                 const onLoaded = () => {
-                    historyContainer.classList.add("library-content-fade-in");
+                    this.library.enterContent(historyContainer);
                     setTimeout(() => historyContainer.classList.add("scrollbar-visible"), 100);
                 };
 
@@ -174,7 +174,7 @@
             // If already initialized (pre-fetched), skip loading and render instantly
             if (this._initialized && this._items.length > 0) {
                 startLoading();
-                historyContainer.classList.add("library-content-fade-in");
+                this.library.enterContent(historyContainer);
                 setTimeout(() => historyContainer.classList.add("scrollbar-visible"), 50);
                 // Trigger background sync (deferred to avoid stutter during transition)
                 setTimeout(() => this.sync(), 400);
@@ -183,11 +183,12 @@
 
             // No cache - show loading screen
             const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" }, [
+            const loading = this.el("div", { className: "empty-state" }, [
                 this.el("div", { className: "empty-icon history-icon" }),
                 this.el("h3", { textContent: "Preparing history..." }),
                 this.el("p", { textContent: "Gathering your browsing history." })
             ]);
+            this.library.enterContent(loading);
             historyContainer.appendChild(loading);
 
             const delay = isTransitioning ? 400 : 200;
@@ -593,7 +594,7 @@
 
             container.appendChild(fragment);
             container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-            container.classList.add("library-content-fade-in");
+            this.library.enterContent(container);
             setTimeout(() => container.classList.add("scrollbar-visible"), 100);
         }
 
@@ -643,7 +644,7 @@
 
             container.appendChild(fragment);
             container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
-            container.classList.add("library-content-fade-in");
+            this.library.enterContent(container);
             setTimeout(() => container.classList.add("scrollbar-visible"), 100);
         }
     }

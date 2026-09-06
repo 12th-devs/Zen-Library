@@ -14,17 +14,6 @@
 
     const STORE_URL = "chrome://sine/content/zen-easel/background/store.sys.mjs";
 
-    const formatWhen = timestamp => {
-        if (!timestamp) return "";
-        const delta = Date.now() - timestamp;
-        const minute = 60000, hour = 3600000, day = 86400000;
-        if (delta < minute) return "just now";
-        if (delta < hour) return `${Math.floor(delta / minute)}m ago`;
-        if (delta < day) return `${Math.floor(delta / hour)}h ago`;
-        if (delta < day * 7) return `${Math.floor(delta / day)}d ago`;
-        return new Date(timestamp).toLocaleDateString();
-    };
-
     class ZenLibraryEasels {
         constructor(library) {
             this.library = library;
@@ -34,6 +23,7 @@
         }
 
         get el() { return this.library.el.bind(this.library); }
+        get svg() { return this.library.svg.bind(this.library); }
 
         // Resolved lazily so that a profile without the easel mod installed shows an
         // empty state rather than throwing at library construction.
@@ -76,6 +66,7 @@
 
         render() {
             const grid = this.el("div", { className: "easel-card-grid" });
+            this.library.enterContent(grid);
 
             if (!this._store()) {
                 grid.appendChild(this._empty(
@@ -145,27 +136,35 @@
                 .catch(() => { this._refreshing = false; });
         }
 
+        _cardTitle(title) {
+            const text = title || "Untitled Easel";
+            return text.length > 20 ? `${text.slice(0, 20)}…` : text;
+        }
+
         _card(entry) {
-            const card = this.el("button", {
+            const mark = this.el("div", { className: "easel-card-mark" });
+            const squiggle = this.svg(`<svg class="easel-card-squiggle" viewBox="20 38 76 68" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31" stroke="currentColor" stroke-width="7.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+            if (squiggle) mark.appendChild(squiggle);
+
+            const fullTitle = entry.title || "Untitled Easel";
+            return this.el("button", {
                 className: "easel-card",
                 type: "button",
-                title: entry.title || "Untitled Easel",
+                dataset: { id: entry.id },
+                title: fullTitle,
                 oncontextmenu: e => this._contextMenu(e, entry),
                 onclick: () => this._openEasel(entry.id)
             }, [
-                this.el("div", { className: "easel-card-info" }, [
-                    this.el("div", { className: "easel-card-title", textContent: entry.title || "Untitled Easel" }),
-                    this.el("div", {
-                        className: "easel-card-meta",
-                        textContent: [
-                            formatWhen(entry.updatedAt),
-                            entry.objectCount ? `${entry.objectCount} item${entry.objectCount === 1 ? "" : "s"}` : ""
-                        ].filter(Boolean).join(" · ")
-                    })
+                this.el("div", { className: "easel-card-frame" }, [
+                    this.el("div", { className: "easel-card-body" }, [
+                        this.el("div", { className: "easel-card-count", textContent: String(entry.objectCount ?? 0) }),
+                        this.el("div", { className: "easel-card-copy" }, [
+                            mark,
+                            this.el("div", { className: "easel-card-title", textContent: this._cardTitle(entry.title) })
+                        ])
+                    ])
                 ])
             ]);
-            this._applyThumbnail(card, entry.id);
-            return card;
         }
 
         // Thumbnails are optional; a board that has never been saved since thumbnails
@@ -351,7 +350,21 @@
                     this._thumbUrls.delete(entry.id);
                 }
 
-                await this._reload();
+                this._easels = this._easels.filter(e => e.id !== entry.id);
+                const grid = this.library.shadowRoot?.querySelector(".easel-card-grid");
+                const card = grid?.querySelector(`.easel-card[data-id="${CSS.escape(entry.id)}"]`);
+                if (!card) {
+                    await this._reload();
+                    return;
+                }
+                const siblings = [...grid.querySelectorAll(".easel-card")].filter(n => n !== card);
+                await window.ZenLibraryUtil.animateCardRemove(card, { siblings });
+                if (grid.isConnected && !grid.querySelector(".easel-card:not(.easel-card-new)")) {
+                    grid.appendChild(this._empty(
+                        "No easels yet",
+                        "Press Ctrl+Shift+E to start one."
+                    ));
+                }
             });
 
             popup.openPopupAtScreen(e.screenX, e.screenY, true);

@@ -25,6 +25,31 @@
   );
 }
 
+/* Zen's document-level `*:not(.no-squircles)` does not pierce this shadow
+   tree. Replicate it here so library chrome uses the same superellipse.
+   Scoped to :host: this file is also loaded as global chrome, and an
+   unscoped `*::before`/`*::after` rule would squircle Zen's circular
+   noise knob in the theme picker. */
+@media (-moz-pref("layout.css.corner-shape.enabled")) {
+  :where(:host, :host *:not(.no-squircles)) {
+    corner-shape: superellipse(var(--zen-squircle-value));
+  }
+
+  :where(:host .zen-squircle-before)::before,
+  :where(:host .zen-squircle-after)::after {
+    corner-shape: superellipse(var(--zen-squircle-value));
+  }
+
+  .library-create-workspace-button,
+  .boosts-toggle,
+  .boosts-toggle-track,
+  .boosts-toggle-thumb,
+  .download-progress-bar,
+  .download-progress-fill {
+    corner-shape: round;
+  }
+}
+
 /* Declared the way Firefox declares its own toolbar icons: list-style-image goes on the
    button, not on .toolbarbutton-icon (see toolbarbutton-icons.css, `#back-button { ... }`).
    Every .toolbarbutton-1 already carries `-moz-context-properties: fill, fill-opacity`
@@ -38,6 +63,7 @@
 #zen-library-button {
   list-style-image: url("chrome://sine/content/zen-library/resources/zen-library.svg");
 }
+
 
 .zen-library-container {
   display: flex;
@@ -314,6 +340,14 @@
 
 .library-content-fade-in {
   animation: contentFadeIn 0.3s var(--zen-library-easing);
+}
+
+.library-card-exiting {
+  opacity: 0 !important;
+  transform: scale(0.92) !important;
+  transition: opacity 0.18s var(--zen-library-easing, ease),
+    transform 0.18s var(--zen-library-easing, ease) !important;
+  pointer-events: none !important;
 }
 
 /* SEARCH */

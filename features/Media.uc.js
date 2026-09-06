@@ -75,53 +75,6 @@
 
         get el() { return this.library.el.bind(this.library); }
 
-        renderFilterBar() {
-            const filterBar = this.el("div", { className: "media-filter-bar" });
-            const filters = [
-                { id: "all", label: "All", iconClass: "icon-all" },
-                { id: "images", label: "Images", iconClass: "icon-images" },
-                { id: "videos", label: "Videos", iconClass: "icon-videos" },
-                { id: "audio", label: "Audio", iconClass: "icon-audio" }
-            ];
-
-            filters.forEach(f => {
-                const pill = this.el("div", {
-                    className: `media-filter-pill ${this._filter === f.id ? 'active' : ''}`,
-                    title: f.label,
-                    dataset: { filter: f.id },
-                    onclick: () => {
-                        if (this._filter === f.id) return;
-                        this._filter = f.id;
-                        this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
-                        filterBar.querySelectorAll(".media-filter-pill").forEach(p => p.classList.remove("active"));
-                        pill.classList.add("active");
-                        this._stopCurrentAudio(); // STOP ON FILTER CHANGE
-                        const container = this._container;
-                        const token = ++this._renderToken;
-                        const cached = this._scanCache;
-                        if (cached) {
-                            this.renderList(cached);
-                            container?.classList.add("library-content-fade-in");
-                            return;
-                        }
-                        this.fetchDownloads().then(downloads => {
-                            if (!this._canRender(token, container)) return;
-                            container.classList.remove("library-content-fade-in");
-                            void container.offsetWidth; // Force reflow
-                            this.renderList(downloads);
-                            if (this._canRender(token, container)) {
-                                container.classList.add("library-content-fade-in");
-                            }
-                        });
-                    }
-                }, [
-                    this.el("div", { className: `icon-mask ${f.iconClass}` })
-                ]);
-                filterBar.appendChild(pill);
-            });
-            return filterBar;
-        }
-
         render() {
             // Main wrapper
             const wrapper = this.el("div", {
@@ -144,7 +97,7 @@
                     if (l) l.remove();
                     this.renderList(downloads);
                     if (!this._canRender(token, container)) return;
-                    container.classList.add("library-content-fade-in");
+                    this.library.enterContent(container);
                     setTimeout(() => {
                         if (this._canRender(token, container)) {
                             container.classList.add("scrollbar-visible");
@@ -155,11 +108,13 @@
 
             if (this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
                 this.renderList(this._scanCache);
-                container.classList.add("library-content-fade-in", "scrollbar-visible");
+                this.library.enterContent(container);
+                container.classList.add("scrollbar-visible");
                 return wrapper;
             }
 
-            const loading = this.el("div", { className: "empty-state library-content-fade-in" });
+            const loading = this.el("div", { className: "empty-state" });
+            this.library.enterContent(loading);
 
             // Use correct Media Icon SVG (Film Strip)
             const iconSvg = `<svg class="empty-icon media-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3L8 8M16 3L15 8M22 8H2M6.8 21H17.2C18.8802 21 19.7202 21 20.362 20.673C20.9265 20.3854 21.3854 19.9265 21.673 19.362C22 18.7202 22 17.8802 22 16.2V7.8C22 6.11984 22 5.27976 21.673 4.63803C21.3854 4.07354 20.9265 3.6146 20.362 3.32698C19.7202 3 18.8802 3 17.2 3H6.8C5.11984 3 4.27976 3 3.63803 3.32698C3.07354 3.6146 2.6146 4.07354 2.32698 4.63803C2 5.27976 2 6.11984 2 7.8V16.2C2 17.8802 2 18.7202 2.32698 19.362C2.6146 19.9265 3.07354 20.3854 3.63803 20.673C4.27976 21 5.11984 21 6.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -814,10 +769,6 @@
                     audioIconContainer.appendChild(this.el("div", { className: "progress-bar-container" }, [
                         this.el("div", { className: "progress-bar-fill" })
                     ]));
-                    audioIconContainer.appendChild(this.el("div", { className: "audio-control-overlay" }, [
-                        this.el("div", { className: "icon-mask icon-play" }),
-                        this.el("div", { className: "icon-mask icon-pause" })
-                    ]));
                     previewContainer.appendChild(audioIconContainer);
 
                     const durationBadge = this.el("div", { className: "video-duration-badge", textContent: "..." });
@@ -850,23 +801,7 @@
                     previewContainer.appendChild(imgEl);
                 }
 
-                let timeStr = "";
-                try {
-                    const date = new Date(item.timestamp);
-                    timeStr = date.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " +
-                        date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
-                } catch (e) { }
-
-                const info = this.el("div", { className: "media-info" }, [
-                    this.el("div", { className: "media-title", textContent: item.filename }),
-                    this.el("div", { className: "media-meta-row" }, [
-                        this.el("div", { className: "media-meta", textContent: this.formatBytes(item.size) }),
-                        this.el("div", { className: "media-time", textContent: timeStr })
-                    ])
-                ]);
-
                 card.appendChild(previewContainer);
-                card.appendChild(info);
 
                 // Distribute round-robin to columns
                 columns[index % colCount].appendChild(card);
@@ -1000,13 +935,19 @@
                 if (!confirmed) return;
                 try {
                     if (item.file.exists()) item.file.remove(false);
-                    const card = this._container?.querySelector(`.media-card[data-id="${CSS.escape(item.id)}"]`);
-                    if (card) {
-                        card.style.transition = "opacity 0.15s, transform 0.15s";
-                        card.style.opacity = "0";
-                        card.style.transform = "scale(0.95)";
-                        setTimeout(() => card.remove(), 160);
+                    if (this._scanCache) {
+                        this._scanCache = this._scanCache.filter(d => d.id !== item.id);
                     }
+                    this._itemCount = Math.max(0, (this._itemCount || 1) - 1);
+                    window.gZenLibraryMediaCount = this._itemCount;
+                    const card = this._container?.querySelector(`.media-card[data-id="${CSS.escape(item.id)}"]`);
+                    if (!card) return;
+                    const siblings = [...this._container.querySelectorAll(".media-card")].filter(n => n !== card);
+                    window.ZenLibraryUtil.animateCardRemove(card, { siblings }).then(() => {
+                        if (this._container?.isConnected && !this._container.querySelector(".media-card")) {
+                            this.renderList(this._scanCache || []);
+                        }
+                    });
                 } catch (err) {
                     console.error("[ZenLibrary Media] Delete failed:", err);
                 }

@@ -303,7 +303,7 @@
 
                     const sidebarItemsContainer = document.createElement("div");
                     sidebarItemsContainer.className = "sidebar-items";
-                    const sidebarItems = ["downloads", "media", "history", "easels", "spaces", "boosts"];
+                    const sidebarItems = ["media", "downloads", "easels", "spaces", "boosts", "history"];
                     const parser = new DOMParser();
 
                     sidebarItems.forEach(id => {
@@ -668,6 +668,7 @@
         // ran, the grid existed and the tab had not changed — so the Easels list never
         // refreshed in place, and typing in its search box did nothing at all.
         update(force = false) {
+            this._updateDepth = (this._updateDepth || 0) + 1;
             try {
                 // Check if custom elements are properly registered
                 if (!customElements.get('zen-library-item')) {
@@ -716,6 +717,14 @@
                 // replaces the content behind update()'s back leaves a stale tab's markup
                 // in place while the selector checks below happily find their container.
                 const contentBelongsToTab = content?.dataset?.tab === this.activeTab;
+                // Entrance fade is for opening a section, not for in-place updates
+                // (delete, rename, search, index refresh). Those remount the same
+                // grid and would otherwise replay library-content-fade-in.
+                // Nested update() calls (Media width recalc mid-render) must not
+                // clear a fade that the outer pass already decided to play.
+                const entering = tabChanged || !contentBelongsToTab;
+                if (this._updateDepth === 1) this._contentEntering = entering;
+                else if (entering) this._contentEntering = true;
                 this._lastRenderedTab = this.activeTab;
 
                 // Header / Search Bar Logic
@@ -797,12 +806,6 @@
                             searchInput
                         ]);
                         header.appendChild(searchContainer);
-
-                        // Support for module-specific header extensions (e.g. Media filter bar)
-                        const module = this[this.activeTab];
-                        if (module && typeof module.renderFilterBar === "function") {
-                            header.appendChild(module.renderFilterBar());
-                        }
                     }
                 } else {
                     header.innerHTML = "";
@@ -875,7 +878,7 @@
                     content.dataset.tab = this.activeTab;
                 } else if (!this[this.activeTab] && !elToAppend && tabChanged) {
                     // Fallback if module missing
-                    content.innerHTML = `<div class="empty-state library-content-fade-in">
+                    content.innerHTML = `<div class="empty-state${this._contentEntering ? " library-content-fade-in" : ""}">
                          <div class="empty-icon ${this.activeTab}-icon"></div>
                          <h3>Feature not available</h3>
                          <p>The ${this.activeTab} module is not loaded.</p>
@@ -895,6 +898,8 @@
                         textContent: `Error loading content: ${e.message}`
                     }));
                 }
+            } finally {
+                this._updateDepth = Math.max(0, (this._updateDepth || 1) - 1);
             }
         }
 
@@ -903,6 +908,11 @@
         // change had to be made twice and in practice was not.
         el(tag, props = {}, children = []) {
             return window.ZenLibraryUtil.el(tag, props, children);
+        }
+
+        enterContent(node) {
+            if (this._contentEntering && node) node.classList.add("library-content-fade-in");
+            return node;
         }
 
         svg(svgString) {
@@ -1225,6 +1235,7 @@
             return {
                 // [audit] MAINT-1 — was a second verbatim copy of el(). Same function now.
                 el: (tag, props = {}, children = []) => window.ZenLibraryUtil.el(tag, props, children),
+                enterContent: (node) => node,
                 style: { getPropertyValue: () => "" },
                 store: this.store
             };
