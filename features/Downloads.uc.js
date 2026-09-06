@@ -50,7 +50,7 @@
             // If we have cached data, render instantly
             if (this._cachedDownloads) {
                 this.renderList(this._cachedDownloads);
-                this.library.enterContent(container);
+                container.classList.add("library-content-fade-in");
                 requestAnimationFrame(() => {
                     if (this._canRender(token, container)) container.classList.add("scrollbar-visible");
                 });
@@ -60,12 +60,11 @@
             }
 
             // No cache - show loading and fetch
-            const loading = this.el("div", { className: "empty-state" }, [
+            const loading = this.el("div", { className: "empty-state library-content-fade-in" }, [
                 this.el("div", { className: "empty-icon downloads-icon" }),
                 this.el("h3", { textContent: "Loading downloads..." }),
                 this.el("p", { textContent: "Hang tight, we're gathering your download history." })
             ]);
-            this.library.enterContent(loading);
             container.appendChild(loading);
 
             const isTransitioning = window.gZenLibrary && window.gZenLibrary._isTransitioning;
@@ -77,7 +76,7 @@
                     const l = container.querySelector(".empty-state");
                     if (l) l.remove();
                     this.renderList(downloads);
-                    this.library.enterContent(container);
+                    container.classList.add("library-content-fade-in");
                     requestAnimationFrame(() => {
                         if (this._canRender(token, container)) container.classList.add("scrollbar-visible");
                     });
@@ -732,6 +731,37 @@
             // Placeholder
         }
 
+        removeDownloadRow(item, itemEl) {
+            this._cachedDownloads = this._cachedDownloads?.filter(d => d.id !== item.id) ?? null;
+
+            itemEl.style.transition = "opacity 0.15s, transform 0.15s";
+            itemEl.style.opacity = "0";
+            itemEl.style.transform = "translateX(-8px)";
+
+            setTimeout(() => {
+                let section = itemEl.previousElementSibling;
+                while (section && !section.classList?.contains("history-section-header")) {
+                    section = section.previousElementSibling;
+                }
+
+                itemEl.remove();
+
+                let hasSectionRows = false;
+                let next = section?.nextElementSibling;
+                while (next && !next.classList?.contains("history-section-header")) {
+                    if (next.matches?.("zen-library-item, .download-progress-item")) {
+                        hasSectionRows = true;
+                        break;
+                    }
+                    next = next.nextElementSibling;
+                }
+
+                if (section && !hasSectionRows) {
+                    section.remove();
+                }
+            }, 160);
+        }
+
         // [audit] LEAK-2 — scheduleProgressRefresh arms a 1s timer that re-fetches and
         // re-renders while a download is in flight, and it re-arms itself from renderList.
         // Nothing cleared it, so a window closed mid-download left the chain running against
@@ -774,12 +804,17 @@
             deleteItem.id = "zen-downloads-ctx-delete";
             deleteItem.setAttribute("label", "Delete from history");
 
+            const deleteFileItem = document.createXULElement("menuitem");
+            deleteFileItem.id = "zen-downloads-ctx-delete-file";
+            deleteFileItem.setAttribute("label", "Delete file");
+
             popup.appendChild(openFileItem);
             popup.appendChild(openLinkItem);
             popup.appendChild(pauseItem);
             popup.appendChild(document.createXULElement("menuseparator"));
             popup.appendChild(renameItem);
             popup.appendChild(document.createXULElement("menuseparator"));
+            popup.appendChild(deleteFileItem);
             popup.appendChild(deleteItem);
             (document.getElementById("mainPopupSet") || document.body).appendChild(popup);
         }
@@ -788,7 +823,7 @@
             this._ensureContextMenu();
             const popup = document.getElementById("zen-downloads-context-menu");
 
-            for (const id of ["zen-downloads-ctx-open-file", "zen-downloads-ctx-open-link", "zen-downloads-ctx-pause", "zen-downloads-ctx-rename", "zen-downloads-ctx-delete"]) {
+            for (const id of ["zen-downloads-ctx-open-file", "zen-downloads-ctx-open-link", "zen-downloads-ctx-pause", "zen-downloads-ctx-rename", "zen-downloads-ctx-delete-file", "zen-downloads-ctx-delete"]) {
                 const el = document.getElementById(id);
                 if (el) el.replaceWith(el.cloneNode(true));
             }
@@ -843,6 +878,44 @@
                 }
             });
 
+            const deleteFileItem = document.getElementById("zen-downloads-ctx-delete-file");
+            deleteFileItem.hidden = !item.targetPath || item.status === "deleted";
+            deleteFileItem.addEventListener("command", async () => {
+                const confirmed = Services.prompt.confirm(
+                    window,
+                    "Delete File",
+                    `Are you sure you want to permanently delete "${item.filename}"?\n\nThis action cannot be undone.`
+                );
+                if (!confirmed) return;
+
+                try {
+                    const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+                    file.initWithPath(item.targetPath);
+                    if (!file.exists()) {
+                        Services.prompt.alert(window, "Zen Library", "That file is no longer there.");
+                        return;
+                    }
+
+                    file.remove(false);
+
+                    try {
+                        const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
+                        const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
+                        const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
+                        const isPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
+                        const list = await DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
+                        await list.remove(item.historyRaw || item.raw);
+                    } catch (historyErr) {
+                        console.warn("[ZenLibrary Downloads] Deleted file but could not remove history entry:", historyErr);
+                    }
+
+                    this.removeDownloadRow(item, itemEl);
+                } catch (err) {
+                    console.error("[ZenLibrary Downloads] Delete file failed:", err);
+                    Services.prompt.alert(window, "Zen Library", "Could not delete that file.");
+                }
+            });
+
             document.getElementById("zen-downloads-ctx-delete").addEventListener("command", async () => {
                 try {
                     const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
@@ -851,13 +924,7 @@
                     const isPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
                     const list = await DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
                     await list.remove(item.historyRaw || item.raw);
-                    itemEl.style.transition = "opacity 0.15s, transform 0.15s";
-                    itemEl.style.opacity = "0";
-                    itemEl.style.transform = "translateX(-8px)";
-                    setTimeout(() => {
-                        this._cachedDownloads = this._cachedDownloads?.filter(d => d.id !== item.id) ?? null;
-                        if (this._cachedDownloads) this.renderList(this._cachedDownloads);
-                    }, 160);
+                    this.removeDownloadRow(item, itemEl);
                 } catch (err) {
                     console.error("[ZenLibrary Downloads] Delete failed:", err);
                 }

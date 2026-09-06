@@ -124,7 +124,7 @@
                 }
             };
 
-            this.library.enterContent(grid);
+            grid.classList.add("library-content-fade-in");
 
             // Restore scroll position
             if (oldScroll > 0) {
@@ -235,12 +235,20 @@
                 } else if (ws.icon && ws.icon.trim().length > 0) {
                     iconEl = this.el("span", { textContent: ws.icon, className: "library-workspace-icon-text" });
                 } else {
-                    iconEl = this.el("div", { className: "library-workspace-icon-empty" });
+                    iconEl = this.el("span", {
+                        textContent: this.getWorkspaceIcon(ws),
+                        className: "library-workspace-icon-text fallback"
+                    });
                 }
 
                 const iconContainer = this.el("div", {
                     className: "library-workspace-icon-container"
                 }, [iconEl]);
+                iconContainer.addEventListener("dblclick", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.changeWorkspaceIcon(ws, iconContainer);
+                });
 
                 const editBtn = this.el("div", {
                     className: "library-workspace-edit-button",
@@ -262,12 +270,19 @@
                     this.showWorkspaceMenu(e, ws);
                 });
 
+                const nameEl = this.el("span", {
+                    className: "library-workspace-name",
+                    textContent: ws.name
+                });
+                nameEl.addEventListener("dblclick", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.startInlineRename(e, ws);
+                });
+
                 const header = this.el("div", { className: "library-workspace-card-header" }, [
                     iconContainer,
-                    this.el("span", {
-                        className: "library-workspace-name",
-                        textContent: ws.name
-                    }),
+                    nameEl,
                     editBtn
                 ]);
 
@@ -296,23 +311,8 @@
                     const itemsLen = items.length;
                     for (let i = 0; i < itemsLen; i++) {
                         const item = items[i];
-                        if (i === pinnedCount && !separatorCreated) {
-                            const cleanupBtn = this.el("div", {
-                                className: "library-workspace-cleanup-button",
-                                title: "Clear unpinned tabs"
-                            }, [this.el("span", { textContent: "Clear" })]);
-
-                            cleanupBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                this.closeWorkspaceUnpinnedTabs(ws.uuid);
-                            });
-
-                            const separatorContainer = this.el("div", { className: "library-workspace-separator-container" }, [
-                                this.el("div", { className: "library-workspace-separator" }),
-                                cleanupBtn
-                            ]);
-                            listContainer.appendChild(separatorContainer);
+                        if (pinnedCount > 0 && i === pinnedCount && !separatorCreated) {
+                            listContainer.appendChild(this.createWorkspaceSeparator(ws.uuid));
                             separatorCreated = true;
                         }
                         this.renderItemRecursive(item, listContainer, ws.uuid);
@@ -370,16 +370,12 @@
                     const originalIndex = Array.from(grid.children).indexOf(placeholder);
 
                     let currentX = preDragRect.left;
-                    let currentY = lockedY;
                     let targetX = preDragRect.left;
-                    let targetY = lockedY;
                     let isDragging = true;
-                    let isLanding = false;
                     let mouseX = e.clientX;
 
                     const finalizeDrop = () => {
                         isDragging = false;
-                        isLanding = false;
                         overlay.remove();
 
                         grid.removeAttribute("dragging-workspace");
@@ -403,9 +399,6 @@
                         if (newIndex !== originalIndex) {
                             if (window.gZenWorkspaces && window.gZenWorkspaces.reorderWorkspace) {
                                 window.gZenWorkspaces.reorderWorkspace(ws.uuid, newIndex);
-                                setTimeout(() => {
-                                    if (this.library.update) this.library.update();
-                                }, 100);
                             }
                         }
 
@@ -417,31 +410,21 @@
                     };
 
                     const moveLoop = () => {
-                        if (!isDragging && !isLanding) return;
-
-                        const lerpFactor = isLanding ? 0.25 : 0.18;
-                        currentX += (targetX - currentX) * lerpFactor;
-                        currentY += (targetY - currentY) * lerpFactor;
-
+                        if (!isDragging) return;
                         const currentGridRect = grid.getBoundingClientRect();
-                        card.style.left = (currentX - currentGridRect.left) + "px";
-                        card.style.top = (currentY - currentGridRect.top) + "px";
+                        currentX += (targetX - currentX) * 0.42;
+                        if (Math.abs(targetX - currentX) < 0.5) currentX = targetX;
 
-                        if (isLanding) {
-                            const dist = Math.hypot(targetX - currentX, targetY - currentY);
-                            if (dist < 0.5) {
-                                finalizeDrop();
-                                return;
-                            }
-                        } else {
-                            const scrollThreshold = 150;
-                            if (mouseX < currentGridRect.left + scrollThreshold) {
-                                const intensity = Math.pow((currentGridRect.left + scrollThreshold - mouseX) / scrollThreshold, 2);
-                                grid.scrollLeft -= intensity * 25;
-                            } else if (mouseX > currentGridRect.right - scrollThreshold) {
-                                const intensity = Math.pow((mouseX - (currentGridRect.right - scrollThreshold)) / scrollThreshold, 2);
-                                grid.scrollLeft += intensity * 25;
-                            }
+                        card.style.left = (currentX - currentGridRect.left) + "px";
+                        card.style.top = (lockedY - currentGridRect.top) + "px";
+
+                        const scrollThreshold = 150;
+                        if (mouseX < currentGridRect.left + scrollThreshold) {
+                            const intensity = Math.pow((currentGridRect.left + scrollThreshold - mouseX) / scrollThreshold, 2);
+                            grid.scrollLeft -= intensity * 25;
+                        } else if (mouseX > currentGridRect.right - scrollThreshold) {
+                            const intensity = Math.pow((mouseX - (currentGridRect.right - scrollThreshold)) / scrollThreshold, 2);
+                            grid.scrollLeft += intensity * 25;
                         }
 
                         requestAnimationFrame(moveLoop);
@@ -450,7 +433,6 @@
                     const onMouseMove = (moveEvent) => {
                         mouseX = moveEvent.clientX;
                         targetX = mouseX - initialOffsetX;
-                        targetY = lockedY;
 
                         const gridRect = grid.getBoundingClientRect();
                         const scrollLeft = grid.scrollLeft;
@@ -466,41 +448,12 @@
                         const currentIdx = currentChildren.indexOf(placeholder);
 
                         if (targetIdx !== currentIdx) {
-                            const siblings = currentChildren.filter(c => c !== placeholder);
-                            const firstPositions = new Map();
-                            siblings.forEach(s => firstPositions.set(s, s.getBoundingClientRect()));
-
                             // Find target element among static flow
                             const swapTarget = currentChildren[targetIdx < currentIdx ? targetIdx : targetIdx + 1] || grid.querySelector('.library-create-workspace-button');
 
-                            grid.insertBefore(placeholder, swapTarget);
-
-                            // Re-check index in the NEW child list
-                            const newChildren = Array.from(grid.children).filter(c => c.classList.contains('library-workspace-card') && !c.hasAttribute('dragged') || c === placeholder);
-                            const finalIdx = newChildren.indexOf(placeholder);
-
-                            if (finalIdx !== currentIdx) {
-                                // Trigger animation
-                                placeholder.classList.remove("entering");
-                                void placeholder.offsetWidth;
-                                placeholder.classList.add("entering");
-
-                                // Shift siblings smoothly (FLIP)
-                                siblings.forEach(s => {
-                                    const first = firstPositions.get(s);
-                                    const last = s.getBoundingClientRect();
-                                    const dx = first.left - last.left;
-                                    if (dx !== 0) {
-                                        s.style.transition = 'none';
-                                        s.style.transform = `translateX(${dx}px)`;
-                                        void s.offsetWidth;
-                                        requestAnimationFrame(() => {
-                                            s.style.transition = 'transform 0.3s var(--zen-library-easing)';
-                                            s.style.transform = '';
-                                        });
-                                    }
-                                });
-                            }
+                            this.animateWorkspaceCardShift(grid, () => {
+                                grid.insertBefore(placeholder, swapTarget);
+                            });
                         }
                     };
 
@@ -508,11 +461,7 @@
                         isDragging = false;
                         document.removeEventListener("mousemove", onMouseMove);
                         document.removeEventListener("mouseup", onMouseUp);
-
-                        const finalRect = placeholder.getBoundingClientRect();
-                        targetX = finalRect.left;
-                        targetY = lockedY;
-                        isLanding = true;
+                        finalizeDrop();
                     };
 
                     document.addEventListener("mousemove", onMouseMove);
@@ -536,36 +485,38 @@
             }
         }
 
-        _collectUnpinnedTabs(container) {
-            // A Set because allItemsRecursive already returns descendants, so a nested group would queue its tabs twice.
-            const tabs = new Set();
-            const visit = (item) => {
-                if (!item) return;
-                if (item.hasAttribute?.("cloned") ||
-                    item.hasAttribute?.("zen-empty-tab") ||
-                    item.hasAttribute?.("zen-essential")) return;
-                if (window.gBrowser.isTab(item)) {
-                    if (!item.pinned) tabs.add(item);
-                    return;
-                }
-                if (window.gBrowser.isTabGroup(item)) {
-                    const children = item.allItemsRecursive || item.allItems || item.tabs || [];
-                    for (const child of children) visit(child);
-                }
-            };
-            for (const child of container?.children || []) visit(child);
-            return [...tabs];
+        animateWorkspaceCardShift(grid, mutate) {
+            const cards = Array.from(grid.children).filter(el =>
+                el.classList.contains("library-workspace-card") && !el.hasAttribute("dragged")
+            );
+            const before = new Map(cards.map(el => [el, el.getBoundingClientRect()]));
+
+            mutate();
+
+            cards.forEach(el => {
+                const from = before.get(el);
+                if (!from) return;
+
+                const to = el.getBoundingClientRect();
+                const dx = from.left - to.left;
+                if (Math.abs(dx) < 1) return;
+
+                el.style.transition = "none";
+                el.style.transform = `translateX(${dx}px)`;
+                void el.offsetWidth;
+                el.style.transition = "transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)";
+                el.style.transform = "";
+            });
         }
 
         closeWorkspaceUnpinnedTabs(workspaceId) {
             const wsEl = window.gZenWorkspaces.workspaceElement(workspaceId);
-            // Same unpinned section the card draws from. Direct children can be
-            // folders or split views, so we walk those instead of only isTab.
-            const tabs = this._collectUnpinnedTabs(wsEl?.tabsContainer);
+            const tabs = Array.from(wsEl?.tabsContainer?.children || []).filter(child =>
+                window.gBrowser.isTab(child) && !child.hasAttribute("zen-essential")
+            );
 
             if (tabs.length === 0) return;
 
-            // Never pull a focused, playing, PiP, or camera/mic/screen-sharing tab out from under the user.
             let closableTabs = tabs.filter(tab => {
                 const attributes = ["selected", "multiselected", "pictureinpicture", "soundplaying"];
                 for (const attr of attributes) if (tab.hasAttribute(attr)) return false;
@@ -591,9 +542,6 @@
                 });
             }
 
-            if (this.library.update) {
-                setTimeout(() => this.library.update(), 200);
-            }
         }
 
         renderItemRecursive(item, container, wsId) {
@@ -688,7 +636,11 @@
 
             const itemEl = this.el("div", {
                 className: `library-workspace-item ${tab.selected ? 'selected' : ''}`,
-                onclick: () => {
+                onclick: (e) => {
+                    if (this._suppressNextTabClick || e.defaultPrevented) {
+                        this._suppressNextTabClick = false;
+                        return;
+                    }
                     if (window.gZenWorkspaces.activeWorkspace !== wsId) {
                         window.gZenWorkspaces.changeWorkspaceWithID(wsId);
                     }
@@ -699,9 +651,16 @@
                 this.el("img", { src: iconSrc, className: "item-icon", onerror: "this.src='chrome://global/skin/icons/defaultFavicon.svg'" }),
                 this.el("span", { className: "item-label", textContent: tab.label })
             ]);
+            itemEl.draggable = true;
+            itemEl._zenLibraryTab = tab;
+            itemEl.addEventListener("dragstart", (e) => this.onTabDragStart(e, tab, wsId));
+            itemEl.addEventListener("dragover", (e) => this.onTabDragOver(e, tab, wsId));
+            itemEl.addEventListener("dragleave", () => itemEl.removeAttribute("drag-over"));
+            itemEl.addEventListener("drop", (e) => this.onTabDrop(e, tab, wsId));
+            itemEl.addEventListener("dragend", () => this.clearTabDragState());
 
             const contextId = tab.getAttribute("usercontextid");
-            if (contextId && contextId !== "0") {
+            if (contextId && contextId !== "0" && !this.isWorkspaceProfileContainer(wsId, contextId, tab)) {
                 const computedStyle = window.getComputedStyle(tab);
                 const identityColor = computedStyle.getPropertyValue("--identity-tab-color");
                 const identityLine = this.el("div", {
@@ -716,14 +675,19 @@
                 title: isPinned ? "Unpin Tab" : "Close Tab",
                 onclick: (e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     if (isPinned) {
                         window.gBrowser.unpinTab(tab);
                     } else {
                         window.gBrowser.removeTab(tab);
                     }
-                    if (this.library.update) setTimeout(() => this.library.update(), 150);
+                    setTimeout(() => this.renderIntoExistingCard(wsId), 0);
                 }
             }, [this.el("div", { className: "icon-mask" })]);
+            closeBtn.addEventListener("mousedown", (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+            });
             itemEl.appendChild(closeBtn);
 
             container.appendChild(itemEl);
@@ -733,9 +697,153 @@
         // for loaded tabs, so an unloaded pinned tab reports its old favicon there.
         getTabIcon(tab) {
             return tab.zenStaticIcon ||
+                tab.getAttribute?.("image") ||
                 tab.image ||
                 tab.icon ||
+                tab.getAttribute?.("busyicon") ||
                 "chrome://global/skin/icons/defaultFavicon.svg";
+        }
+
+        getWorkspaceIcon(ws) {
+            try {
+                if (window.gZenWorkspaces?.getWorkspaceIcon) {
+                    return window.gZenWorkspaces.getWorkspaceIcon(ws);
+                }
+            } catch (e) { }
+
+            const icon = String(ws?.icon || "").trim();
+            if (icon) return icon;
+            const name = String(ws?.name || "").trim();
+            return name ? name[0].toUpperCase() : "";
+        }
+
+        getWorkspaceProfileId(wsId) {
+            const workspaces = ZenLibrarySpaces.getWorkspaces();
+            const ws = workspaces.find(workspace => workspace.uuid === wsId);
+            return String(ws?.containerTabId || ws?.userContextId || ws?.usercontextid || ws?.containerId || ws?.defaultProfile || "0");
+        }
+
+        isWorkspaceProfileContainer(wsId, contextId, tab) {
+            if (tab?.hasAttribute?.("zenDefaultUserContextId")) return true;
+            const profileId = this.getWorkspaceProfileId(wsId);
+            return profileId !== "0" && profileId === String(contextId || "0");
+        }
+
+        getWorkspaceIconAnchor(ws) {
+            return this.library.shadowRoot?.querySelector?.(`.library-workspace-card[workspace-id="${CSS.escape(ws.uuid)}"] .library-workspace-icon-container`);
+        }
+
+        onTabDragStart(e, tab, wsId) {
+            if (!window.gBrowser?.isTab?.(tab)) {
+                e.preventDefault();
+                return;
+            }
+            this._draggedTabInfo = { tab, wsId };
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/x-zen-library-tab", tab.getAttribute("zen-tab-id") || tab.linkedPanel || tab.id || "");
+            e.currentTarget.setAttribute("dragged", "true");
+            this._suppressNextTabClick = true;
+        }
+
+        onTabDragOver(e, targetTab, wsId) {
+            if (!this._draggedTabInfo || this._draggedTabInfo.wsId !== wsId || this._draggedTabInfo.tab === targetTab) return;
+            if (this._draggedTabInfo.tab.pinned !== targetTab.pinned) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            e.currentTarget.setAttribute("drag-over", e.clientY > e.currentTarget.getBoundingClientRect().top + e.currentTarget.clientHeight / 2 ? "after" : "before");
+        }
+
+        onTabDrop(e, targetTab, wsId) {
+            if (!this._draggedTabInfo || this._draggedTabInfo.wsId !== wsId) return;
+            const draggedTab = this._draggedTabInfo.tab;
+            if (draggedTab === targetTab || draggedTab.pinned !== targetTab.pinned) return;
+
+            e.preventDefault();
+            const placeAfter = e.currentTarget.getAttribute("drag-over") === "after";
+            const container = targetTab.parentNode;
+            if (!container || draggedTab.parentNode !== container) return;
+
+            const tabs = Array.from(container.children).filter(child =>
+                window.gBrowser.isTab(child) && !child.hasAttribute("cloned") && !child.hasAttribute("zen-empty-tab")
+            );
+            if (!tabs.includes(draggedTab) || !tabs.includes(targetTab)) return;
+
+            const tabsWithoutDragged = tabs.filter(tab => tab !== draggedTab);
+            const targetIndex = tabsWithoutDragged.indexOf(targetTab);
+            if (targetIndex < 0) return;
+
+            const referenceTab = placeAfter ? tabsWithoutDragged[targetIndex + 1] || null : targetTab;
+            container.insertBefore(draggedTab, referenceTab);
+
+            this.renderIntoExistingCard(wsId);
+            this.clearTabDragState();
+        }
+
+        clearTabDragState() {
+            this.library.shadowRoot?.querySelectorAll?.(".library-workspace-item[dragged], .library-workspace-item[drag-over]")
+                .forEach(item => {
+                    item.removeAttribute("dragged");
+                    item.removeAttribute("drag-over");
+                });
+            this._draggedTabInfo = null;
+            setTimeout(() => {
+                this._suppressNextTabClick = false;
+            }, 0);
+        }
+
+        renderIntoExistingCard(wsId) {
+            const card = this.library.shadowRoot?.querySelector?.(`.library-workspace-card[workspace-id="${CSS.escape(wsId)}"]`);
+            const list = card?.querySelector?.(".library-workspace-card-list");
+            const wsEl = window.gZenWorkspaces?.workspaceElement?.(wsId);
+            if (!list || !wsEl) return;
+
+            list.replaceChildren();
+            const items = [];
+            const collect = (container) => {
+                if (!container) return;
+                Array.from(container.children).forEach(child => {
+                    if (child.hasAttribute("cloned") || child.hasAttribute("zen-empty-tab")) return;
+                    if (window.gBrowser.isTab(child) || window.gBrowser.isTabGroup(child)) items.push(child);
+                });
+            };
+
+            collect(wsEl.pinnedTabsContainer);
+            const pinnedCount = items.length;
+            collect(wsEl.tabsContainer);
+
+            if (items.length === 0) {
+                list.appendChild(this.el("div", {
+                    className: "empty-state",
+                    style: "padding: 20px; text-align:center; opacity:0.5; font-size: 12px;",
+                    textContent: "Empty Workspace"
+                }));
+                return;
+            }
+
+            items.forEach((item, index) => {
+                if (pinnedCount > 0 && index === pinnedCount) {
+                    list.appendChild(this.createWorkspaceSeparator(wsId));
+                }
+                this.renderItemRecursive(item, list, wsId);
+            });
+        }
+
+        createWorkspaceSeparator(wsId) {
+            const cleanupBtn = this.el("div", {
+                className: "library-workspace-cleanup-button",
+                title: "Clear unpinned tabs"
+            }, [this.el("span", { textContent: "Clear" })]);
+
+            cleanupBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.closeWorkspaceUnpinnedTabs(wsId);
+            });
+
+            return this.el("div", { className: "library-workspace-separator-container" }, [
+                this.el("div", { className: "library-workspace-separator" }),
+                cleanupBtn
+            ]);
         }
 
         _ensureWorkspaceMenu() {
@@ -789,7 +897,7 @@
             unloadItem.replaceWith(newUnload);
 
             newRename.addEventListener("command", () => this.renameWorkspace(ws));
-            newIcon.addEventListener("command", () => this.changeWorkspaceIcon(ws, button));
+            newIcon.addEventListener("command", () => this.changeWorkspaceIcon(ws, this.getWorkspaceIconAnchor(ws) || button));
             newTheme.addEventListener("command", (event) => this.editWorkspaceTheme(ws, event));
             newUnload.addEventListener("command", () => this.unloadWorkspace(ws));
 

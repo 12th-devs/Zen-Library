@@ -312,11 +312,7 @@
 
                     row.onclick = (e) => {
                         if (e.target.closest(".boosts-toggle")) return;
-                        // [audit] SEC-2 — `domain` comes from boost storage, so the string
-                        // being navigated to is not one this code produced. Validated, then
-                        // opened with a null triggering principal rather than a system one.
-                        if (!window.ZenLibraryUtil.openExternal(window, `https://${domain}`)) return;
-                        window.gZenLibrary.close();
+                        this.openBoostWithEditor(domain, boost);
                     };
 
                     row.oncontextmenu = (e) => {
@@ -345,6 +341,21 @@
 
             fragment.appendChild(this.el("div", { className: "history-bottom-spacer" }));
             this._container.appendChild(fragment);
+        }
+
+        openBoostWithEditor(domain, boost) {
+            const mgr = this._getManager();
+            const url = `https://${domain}`;
+            const spec = window.ZenLibraryUtil.safeExternalUrl(url);
+            if (!mgr || !spec) return;
+
+            const uri = Services.io.newURI(spec);
+            if (!window.ZenLibraryUtil.openExternal(window, spec)) return;
+
+            window.gZenLibrary.close();
+            setTimeout(() => {
+                mgr.openBoostWindow(window, boost, uri);
+            }, 0);
         }
 
         _createToggle(checked, onToggle) {
