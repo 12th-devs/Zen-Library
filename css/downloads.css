@@ -18,6 +18,71 @@
     pointer-events: none;
 }
 
+.download-row-actions {
+    display: none;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+zen-library-item:hover .download-row-actions,
+zen-library-item[menu-open] .download-row-actions {
+    display: flex;
+}
+
+.download-row-action {
+    appearance: none;
+    border: 0;
+    display: flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius-small, 4px);
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.72;
+}
+
+.download-row-action:hover {
+    opacity: 1;
+    background: var(--zen-library-hover-bg, rgba(255, 255, 255, 0.1));
+}
+
+.download-row-action-icon {
+    display: block;
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+}
+
+.download-row-action-icon.more-icon {
+    mask-image: url("chrome://browser/skin/zen-icons/more.svg");
+}
+
+.download-row-action-icon.retry-icon {
+    mask-image: url("chrome://browser/skin/reload.svg");
+}
+
+.download-row-url {
+    display: none;
+}
+
+zen-library-item:hover .download-row-status,
+zen-library-item[menu-open] .download-row-status {
+    display: none;
+}
+
+zen-library-item:hover .download-row-url,
+zen-library-item[menu-open] .download-row-url {
+    display: inline;
+}
+
 .library-download-progress-item {
     display: flex;
     align-items: center;
@@ -131,7 +196,15 @@
     background: transparent;
     color: inherit;
     cursor: pointer;
-    opacity: 0.6;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+
+.library-download-progress-item:hover .download-progress-cancel,
+.library-download-progress-item[menu-open] .download-progress-cancel {
+    opacity: 0.72;
+    pointer-events: auto;
 }
 
 .download-progress-cancel:hover {

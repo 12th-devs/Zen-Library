@@ -51,7 +51,7 @@
                         // registeredBoostForDomain returns false for disabled boosts,
                         // which would remove them from the list.
                         this._stale = true;
-                        if (this._container) this.renderList();
+                        if (this._container?.isConnected) this.renderList();
                     }
                 }
             };
@@ -150,7 +150,6 @@
                 console.error("[ZenLibrary Boosts] fetchBoosts error:", e);
             }
 
-            console.log(`[ZenLibrary Boosts] Found ${results.length} boosted domains`);
             this._items = results;
         }
 
@@ -244,11 +243,10 @@
 
             newExport.addEventListener("command", async () => {
                 const mgr = this._getManager();
-                if (!mgr) return;
-                const stored = mgr.loadBoostFromStore?.(domain, boost.id) || boost;
-                const boostData = stored?.boostEntry?.boostData || boost.boostEntry?.boostData;
-                const success = boostData && await mgr.exportBoost(window, boostData);
-                if (success) {
+                // boost.boostEntry is the manager's own entry object; nothing fresher to load.
+                const boostData = boost.boostEntry?.boostData;
+                if (!mgr || !boostData) return;
+                if (await mgr.exportBoost(window, boostData)) {
                     window.gZenUIManager?.showToast?.("zen-panel-ui-boosts-exported-message");
                 }
             });
@@ -320,17 +318,19 @@
                     const isEnabled = mgr ? (mgr.getActiveBoostId(domain) === boostId) : (boostId === activeId);
 
                     const row = this.el("div", {
-                        className: `library-list-item zen-library-row library-boost-item${isEnabled ? "" : " boosts-disabled"}`
+                        className: `library-list-item zen-library-row library-boost-item zen-library-boost-row${isEnabled ? "" : " boosts-disabled"}`
                     });
+                    row.toggleAttribute("disabled", !isEnabled);
 
                     // Favicon
-                    const iconContainer = this.el("span", { className: "zen-library-row-icon-wrapper item-icon-container" });
+                    const iconContainer = this.el("span", { className: "zen-library-boost-icon" });
                     // [audit] SEC-3 — `domain` is stored data, and this string is assigned to
                     // cssText, so an unescaped quote in it injected CSS declarations into
                     // privileged chrome rather than merely breaking a favicon.
-                    iconContainer.appendChild(this.el("div", {
-                        className: "item-icon zen-library-row-icon",
-                        style: `background-image: url("${window.ZenLibraryUtil.cssUrl(`page-icon:https://${domain}`)}");`
+                    iconContainer.appendChild(this.el("img", {
+                        className: "zen-library-row-icon",
+                        src: `page-icon:https://${domain}`,
+                        alt: ""
                     }));
                     iconContainer.firstElementChild.toggleAttribute("inactive", !isEnabled);
                     row.appendChild(iconContainer);
@@ -353,13 +353,26 @@
                         mgr.toggleBoostActiveForDomain(domain, boostId);
                         const nowEnabled = mgr.getActiveBoostId(domain) === boostId;
                         row.classList.toggle("boosts-disabled", !nowEnabled);
+                        row.toggleAttribute("disabled", !nowEnabled);
                         iconContainer.firstElementChild.toggleAttribute("inactive", !nowEnabled);
                     });
                     row.appendChild(toggle);
 
                     row.onclick = (e) => {
                         if (e.target.closest(".boosts-toggle")) return;
-                        this.openBoostWithEditor(domain, boost);
+                        if (!mgr) return;
+                        const currentlyEnabled = mgr.getActiveBoostId(domain) === boostId;
+                        if (currentlyEnabled) {
+                            this.openBoostWithEditor(domain, boost);
+                            return;
+                        }
+                        mgr.toggleBoostActiveForDomain(domain, boostId);
+                        row.classList.remove("boosts-disabled");
+                        row.removeAttribute("disabled");
+                        iconContainer.firstElementChild.removeAttribute("inactive");
+                        toggle.setAttribute("checked", "true");
+                        const thumb = toggle.querySelector(".boosts-toggle-thumb");
+                        if (thumb) thumb.style.transform = "translateX(14px)";
                     };
 
                     row.oncontextmenu = (e) => {
@@ -387,10 +400,11 @@
             this._container.appendChild(fragment);
         }
 
+        // openBoostWindow reads boost.domain and closes on the next TabSelect, so load the store shape and open the Glance first.
         openBoostWithEditor(domain, boost) {
             const mgr = this._getManager();
-            const url = `https://${domain}`;
-            const spec = window.ZenLibraryUtil.safeExternalUrl(url);
+            // [audit] SEC-2 — `domain` is stored data: validated, then loaded with a null principal.
+            const spec = window.ZenLibraryUtil.safeExternalUrl(`https://${domain}`);
             if (!mgr || !spec) return;
 
             try {
@@ -402,13 +416,13 @@
                         clientY: window.innerHeight / 2 - tabPanelRect.top,
                         width: 0,
                         height: 0,
-                        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+                        triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({})
                     });
                 } else if (!window.ZenLibraryUtil.openExternal(window, spec)) {
                     return;
                 }
-                const uri = Services.io.newURI(spec);
-                mgr.openBoostWindow(window, boost, uri);
+                const stored = mgr.loadBoostFromStore(domain, boost.id);
+                mgr.openBoostWindow(window, stored, Services.io.newURI(spec));
             } catch (e) {
                 console.error("[ZenLibrary Boosts] Failed to open boost editor:", e);
             }
@@ -442,5 +456,4 @@
     }
 
     window.ZenLibraryBoosts = ZenLibraryBoosts;
-    console.log("[ZenLibrary Boosts] Module loaded");
 })();
