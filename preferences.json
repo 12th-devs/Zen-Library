@@ -52,5 +52,22 @@
     "property": "zen.library.shortcut.downloads",
     "label": "Ctrl+J (Cmd+J on macOS) opens the Library's Downloads",
     "defaultValue": true
+  },
+  {
+    "type": "separator",
+    "label": "Downloads",
+    "margin": "20px 0 10px 0"
+  },
+  {
+    "type": "checkbox",
+    "property": "zen.library.downloads.scan-folder",
+    "label": "Also show files from the Downloads folder",
+    "defaultValue": false
+  },
+  {
+    "type": "text",
+    "label": "When enabled, the Downloads section lazily scans your Downloads folder and adds top-level files or folders Firefox no longer has in its download history. Folder contents are not shown separately. Changes apply immediately while the panel is open.",
+    "size": "12px",
+    "margin": "0 0 8px 0"
   }
 ]
