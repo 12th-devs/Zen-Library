@@ -1752,13 +1752,6 @@
             const name = target && target.localName ? target.localName.toLowerCase() : "";
             if (name === "input" || name === "textarea" || (target && target.isContentEditable)) return;
 
-            // [audit] COMPAT-1 — the guard above only ever worked for chrome UI. When focus
-            // is inside a web page the event's target in this window is the <browser>
-            // element, not the focused field, so every Ctrl+H and Ctrl+J typed into a web
-            // app was swallowed here with no way to opt out. A page gets its keystrokes
-            // unless the library itself is open and focused.
-            if (name === "browser" && !this._isOpen) return;
-
             // [audit] COMPAT-1 — Ctrl+H and Ctrl+J are Firefox's own Library and Downloads
             // shortcuts and are also bound by plenty of web apps. Taking them over is a
             // reasonable default for this mod, but it was unconditional and had no off
@@ -1773,6 +1766,7 @@
             if (isHistoryShortcut && prefBool("zen.library.shortcut.history", true)) {
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation?.();
                 this.openTab("history");
                 return;
             }
@@ -1781,9 +1775,13 @@
             if (isDownloadsShortcut && prefBool("zen.library.shortcut.downloads", true)) {
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation?.();
                 this.openTab("downloads");
                 return;
             }
+
+            // Keep ordinary page shortcuts alone after the Library-owned chords above.
+            if (name === "browser" && !this._isOpen) return;
 
             if (!this._isOpen || !this._element) return;
 
