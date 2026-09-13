@@ -20,6 +20,7 @@
         static SCAN_BATCH_SIZE = 32;
         static COVER_CONCURRENCY = 2;
         static MEDIA_PREVIEW_ROOT_MARGIN = "220px 0px";
+        static HISTORY_SEED_LIMIT = 96;
 
         constructor(library) {
             this.library = library;
@@ -236,7 +237,19 @@
             }
 
             const startLoading = () => {
+                const seedPromise = this.fetchRecentHistoryMedia();
+                seedPromise.then(seedItems => {
+                    if (!seedItems.length || !this._canRender(token, container)) return;
+                    const l = container.querySelector(".empty-state");
+                    if (l) l.remove();
+                    this.renderList(seedItems);
+                    if (!this._canRender(token, container)) return;
+                    this.library.enterContent(container);
+                    container.classList.add("scrollbar-visible");
+                });
+
                 this.fetchDownloads({
+                    seedPromise,
                     onProgress: (items) => this._renderProgressive(items, token, container)
                 }).then(downloads => {
                     if (!this._canRender(token, container)) return;
@@ -457,14 +470,16 @@
         // A newly downloaded file should still show up promptly, so this stays short.
         static CACHE_MS = 15000;
 
-        async fetchDownloads({ force = false, onProgress = null } = {}) {
+        async fetchDownloads({ force = false, onProgress = null, seedPromise = null } = {}) {
             if (!force && this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
                 return this._scanCache;
             }
             // Collapse concurrent callers onto one scan rather than starting several.
             if (this._scanPromise) return this._scanPromise;
 
-            this._scanPromise = this._scan(onProgress)
+            this._scanPromise = Promise.resolve(seedPromise || [])
+                .catch(() => [])
+                .then(seedItems => this._scan(onProgress, seedItems))
                 .then(files => {
                     this._scanCache = files;
                     this._scanAt = Date.now();
@@ -477,6 +492,89 @@
                 .finally(() => { this._scanPromise = null; });
 
             return this._scanPromise;
+        }
+
+        _mediaContentType(filename, fallback = "") {
+            const ext = String(filename || "").split(".").pop().toLowerCase();
+            if (ZenLibraryMedia.IMAGE_EXTS.includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
+            if (ZenLibraryMedia.VIDEO_EXTS.includes(ext)) return "video/" + ext;
+            if (ZenLibraryMedia.AUDIO_EXTS.includes(ext)) return "audio/" + ext;
+            const type = String(fallback || "").toLowerCase();
+            if (type.startsWith("image/") || type.startsWith("video/") || type.startsWith("audio/")) return type;
+            return "";
+        }
+
+        _pathKey(path) {
+            return String(path || "").replaceAll("\\", "/").toLowerCase();
+        }
+
+        async _historyList() {
+            const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
+            const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
+            const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
+            const isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
+            return DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
+        }
+
+        async fetchRecentHistoryMedia(limit = ZenLibraryMedia.HISTORY_SEED_LIMIT) {
+            try {
+                const historyList = await this._historyList();
+                const allDownloads = await historyList.getAll();
+                const recent = allDownloads
+                    .filter(d => d?.target?.path)
+                    .sort((a, b) => (b.endTime || b.startTime || 0) - (a.endTime || a.startTime || 0))
+                    .slice(0, limit);
+
+                const items = [];
+                const seen = new Set();
+                for (let i = 0; i < recent.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
+                    const batch = await Promise.all(recent.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(async d => {
+                        const path = String(d.target?.path || "");
+                        const key = this._pathKey(path);
+                        if (!path || seen.has(key)) return null;
+                        seen.add(key);
+                        const name = PathUtils.filename(path);
+                        const contentType = this._mediaContentType(name, d.contentType || d.target?.contentType);
+                        if (!contentType) return null;
+
+                        let info;
+                        try {
+                            info = await IOUtils.stat(path);
+                        } catch (e) {
+                            return null;
+                        }
+                        if (info.type !== "regular") return null;
+
+                        let file;
+                        try {
+                            file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+                            file.initWithPath(path);
+                        } catch (e) {
+                            return null;
+                        }
+
+                        const timestamp = d.endTime || d.startTime || info.lastModified || 0;
+                        return {
+                            id: `history_${path}_${timestamp}`,
+                            filename: name,
+                            size: info.size || Number(d.target?.size) || 0,
+                            status: "completed",
+                            url: Services.io.newFileURI(file).spec,
+                            contentType,
+                            timestamp,
+                            targetPath: path,
+                            file,
+                            raw: d,
+                            historyRaw: d
+                        };
+                    }));
+                    items.push(...batch.filter(Boolean));
+                }
+
+                return items;
+            } catch (e) {
+                return [];
+            }
         }
 
         _downloadsRootPath() {
@@ -502,7 +600,7 @@
             return downloadsDir.path;
         }
 
-        async _scan(onProgress = null) {
+        async _scan(onProgress = null, seedItems = []) {
             const root = this._downloadsRootPath();
             if (!root) return [];
             this._lastScanRoot = root;
@@ -511,11 +609,8 @@
                 return [];
             }
 
-            const IMAGE_EXTS = ZenLibraryMedia.IMAGE_EXTS;
-            const VIDEO_EXTS = ZenLibraryMedia.VIDEO_EXTS;
-            const AUDIO_EXTS = ZenLibraryMedia.AUDIO_EXTS;
-
-            const mediaFiles = [];
+            const mediaFiles = Array.isArray(seedItems) ? seedItems.slice() : [];
+            const seenPaths = new Set(mediaFiles.map(item => this._pathKey(item.targetPath)).filter(Boolean));
             // Breadth-first with an explicit queue rather than recursion, so the depth cap
             // is a property of the traversal instead of the call stack, and so a directory
             // that fails to read cannot abandon its siblings.
@@ -549,12 +644,8 @@
                             };
                         }
 
-                        const ext = name.split(".").pop().toLowerCase();
-                        let contentType = "";
-                        if (IMAGE_EXTS.includes(ext)) contentType = "image/" + (ext === "jpg" ? "jpeg" : ext);
-                        else if (VIDEO_EXTS.includes(ext)) contentType = "video/" + ext;
-                        else if (AUDIO_EXTS.includes(ext)) contentType = "audio/" + ext;
-                        else return null;
+                        const contentType = this._mediaContentType(name);
+                        if (!contentType || seenPaths.has(this._pathKey(path))) return null;
 
                         // nsIFile is still what the drag path and the cover reader want, but
                         // it is now built from a path already known to be a file, so none of
@@ -615,6 +706,9 @@
 
                     if (found.length) {
                         mediaFiles.push(...found);
+                        for (const item of found) {
+                            seenPaths.add(this._pathKey(item.targetPath));
+                        }
                         if (onProgress) onProgress(mediaFiles.slice());
                     }
                 }
