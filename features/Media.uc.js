@@ -595,16 +595,14 @@
                         const found = batch.filter(Boolean);
                         if (found.length) {
                             mediaFiles.push(...found);
-                            if (onProgress) {
-                                onProgress(mediaFiles.slice().sort((a, b) => b.timestamp - a.timestamp));
-                            }
+                            if (onProgress) onProgress(mediaFiles.slice());
                         }
                     }
                 }
                 level = next;
             }
 
-            return mediaFiles.sort((a, b) => b.timestamp - a.timestamp);
+            return mediaFiles;
         }
 
         renderList(downloads) {
@@ -663,9 +661,6 @@
                 return;
             }
 
-            // Sort by TS. The scanner also returns sorted data, but keep this here for
-            // cached/renamed/deleted paths that may update the list outside a full scan.
-            mediaItems.sort((a, b) => b.timestamp - a.timestamp);
             const renderToken = this._renderToken;
             const visibleLimit = Math.min(this._visibleLimit || ZenLibraryMedia.INITIAL_RENDER_LIMIT, mediaItems.length);
             const visibleItems = mediaItems.slice(0, visibleLimit);
