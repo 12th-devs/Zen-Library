@@ -17,6 +17,10 @@
         static AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
         static INITIAL_RENDER_LIMIT = 36;
         static RENDER_BATCH_SIZE = 36;
+        static SCAN_BATCH_SIZE = 32;
+        static COVER_CONCURRENCY = 2;
+        static MEDIA_PREVIEW_ROOT_MARGIN = "220px 0px";
+        static HISTORY_SEED_LIMIT = 96;
 
         constructor(library) {
             this.library = library;
@@ -27,12 +31,18 @@
             this._currentAudio = null;
             this._playingId = null;
             this._coverCache = new Map();
+            this._pendingCovers = new Set();
+            this._coverListeners = new Map();
+            this._coverQueue = [];
+            this._activeCoverJobs = 0;
             this._fileCache = new Map(); // Cache for Gecko File objects
 
             // [audit] PERF-1 — the scan cache. See fetchDownloads().
             this._scanCache = null;
             this._scanAt = 0;
             this._scanPromise = null;
+            this._progressiveScanItems = null;
+            this._progressiveRenderFrame = 0;
             this._renderToken = 0;
             this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
             this._previewObserver = null;
@@ -52,6 +62,7 @@
             this._contextMenuSuppressTimer = null;
             this._suppressContextMenuUntil = 0;
             this._suppressBrowser = null;
+            this._destroyed = false;
         }
 
         // [audit] LEAK-1 — one place that mints blob URLs, so one place has to remember them.
@@ -59,6 +70,80 @@
             const url = URL.createObjectURL(blob);
             this._objectUrls.add(url);
             return url;
+        }
+
+        _queueCover(item, token, onCover) {
+            if (!item?.file || this._coverCache.has(item.id)) return;
+
+            const listeners = this._coverListeners.get(item.id) || [];
+            listeners.push({ token, onCover });
+            this._coverListeners.set(item.id, listeners);
+            if (this._pendingCovers.has(item.id)) return;
+
+            const job = { item };
+            this._pendingCovers.add(item.id);
+            this._coverQueue.push(job);
+            this._drainCoverQueue();
+        }
+
+        _drainCoverQueue() {
+            while (this._activeCoverJobs < ZenLibraryMedia.COVER_CONCURRENCY && this._coverQueue.length) {
+                const job = this._coverQueue.shift();
+                this._activeCoverJobs++;
+                this._extractCover(job.item.file)
+                    .then(coverUrl => {
+                        if (this._destroyed) {
+                            if (coverUrl) {
+                                try { URL.revokeObjectURL(coverUrl); } catch (e) { }
+                                this._objectUrls.delete(coverUrl);
+                            }
+                            return;
+                        }
+                        this._coverCache.set(job.item.id, coverUrl || null);
+                        if (coverUrl && this.library?.activeTab === "media") {
+                            const listeners = this._coverListeners.get(job.item.id) || [];
+                            for (const listener of listeners) {
+                                if (listener.token === this._renderToken) {
+                                    listener.onCover?.(coverUrl);
+                                }
+                            }
+                        }
+                    })
+                    .catch(() => {
+                        this._coverCache.set(job.item.id, null);
+                    })
+                    .finally(() => {
+                        this._pendingCovers.delete(job.item.id);
+                        this._coverListeners.delete(job.item.id);
+                        this._activeCoverJobs--;
+                        this._drainCoverQueue();
+                    });
+            }
+        }
+
+        _clearPendingCoverJobs() {
+            for (const job of this._coverQueue) {
+                this._pendingCovers.delete(job.item.id);
+                this._coverListeners.delete(job.item.id);
+            }
+            this._coverQueue.length = 0;
+        }
+
+        _renderProgressive(items, token, container) {
+            this._progressiveScanItems = items;
+            if (this._progressiveRenderFrame) return;
+
+            this._progressiveRenderFrame = requestAnimationFrame(() => {
+                this._progressiveRenderFrame = 0;
+                if (!this._canRender(token, container)) return;
+                if (!this._progressiveScanItems?.length) return;
+
+                const loading = container.querySelector(".empty-state");
+                if (loading) loading.remove();
+                this.renderList(this._progressiveScanItems);
+                this.library.enterContent(container);
+                container.classList.add("scrollbar-visible");
+            });
         }
 
         async copyFile(item) {
@@ -131,6 +216,7 @@
         }
 
         render() {
+            this._destroyed = false;
             // Main wrapper
             const wrapper = this.el("div", {
                 className: "library-list-wrapper"
@@ -143,9 +229,28 @@
             // Modules outlive a close/open cycle, so a limit paged up in a previous
             // session would otherwise render every card the user ever scrolled to.
             this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
+            this._progressiveScanItems = null;
+            if (this._progressiveRenderFrame) {
+                cancelAnimationFrame(this._progressiveRenderFrame);
+                this._progressiveRenderFrame = 0;
+            }
 
             const startLoading = () => {
-                this.fetchDownloads().then(downloads => {
+                const seedPromise = this.fetchRecentHistoryMedia();
+                seedPromise.then(seedItems => {
+                    if (!seedItems.length || !this._canRender(token, container)) return;
+                    const l = container.querySelector(".empty-state");
+                    if (l) l.remove();
+                    this.renderList(seedItems);
+                    if (!this._canRender(token, container)) return;
+                    this.library.enterContent(container);
+                    container.classList.add("scrollbar-visible");
+                });
+
+                this.fetchDownloads({
+                    seedPromise,
+                    onProgress: (items) => this._renderProgressive(items, token, container)
+                }).then(downloads => {
                     if (!this._canRender(token, container)) return;
                     const l = container.querySelector(".empty-state");
                     if (l) l.remove();
@@ -364,14 +469,16 @@
         // A newly downloaded file should still show up promptly, so this stays short.
         static CACHE_MS = 15000;
 
-        async fetchDownloads({ force = false } = {}) {
+        async fetchDownloads({ force = false, onProgress = null, seedPromise = null } = {}) {
             if (!force && this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
                 return this._scanCache;
             }
             // Collapse concurrent callers onto one scan rather than starting several.
             if (this._scanPromise) return this._scanPromise;
 
-            this._scanPromise = this._scan()
+            this._scanPromise = Promise.resolve(seedPromise || [])
+                .catch(() => [])
+                .then(seedItems => this._scan(onProgress, seedItems))
                 .then(files => {
                     this._scanCache = files;
                     this._scanAt = Date.now();
@@ -386,7 +493,90 @@
             return this._scanPromise;
         }
 
-        async _scan() {
+        _mediaContentType(filename, fallback = "") {
+            const ext = String(filename || "").split(".").pop().toLowerCase();
+            if (ZenLibraryMedia.IMAGE_EXTS.includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
+            if (ZenLibraryMedia.VIDEO_EXTS.includes(ext)) return "video/" + ext;
+            if (ZenLibraryMedia.AUDIO_EXTS.includes(ext)) return "audio/" + ext;
+            const type = String(fallback || "").toLowerCase();
+            if (type.startsWith("image/") || type.startsWith("video/") || type.startsWith("audio/")) return type;
+            return "";
+        }
+
+        _pathKey(path) {
+            return String(path || "").replaceAll("\\", "/").toLowerCase();
+        }
+
+        async _historyList() {
+            const { DownloadHistory } = ChromeUtils.importESModule("resource://gre/modules/DownloadHistory.sys.mjs");
+            const { Downloads } = ChromeUtils.importESModule("resource://gre/modules/Downloads.sys.mjs");
+            const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
+            const isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
+            return DownloadHistory.getList({ type: isPrivate ? Downloads.ALL : Downloads.PUBLIC });
+        }
+
+        async fetchRecentHistoryMedia(limit = ZenLibraryMedia.HISTORY_SEED_LIMIT) {
+            try {
+                const historyList = await this._historyList();
+                const allDownloads = await historyList.getAll();
+                const recent = allDownloads
+                    .filter(d => d?.target?.path)
+                    .sort((a, b) => (b.endTime || b.startTime || 0) - (a.endTime || a.startTime || 0))
+                    .slice(0, limit);
+
+                const items = [];
+                const seen = new Set();
+                for (let i = 0; i < recent.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
+                    const batch = await Promise.all(recent.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(async d => {
+                        const path = String(d.target?.path || "");
+                        const key = this._pathKey(path);
+                        if (!path || seen.has(key)) return null;
+                        seen.add(key);
+                        const name = PathUtils.filename(path);
+                        const contentType = this._mediaContentType(name, d.contentType || d.target?.contentType);
+                        if (!contentType) return null;
+
+                        let info;
+                        try {
+                            info = await IOUtils.stat(path);
+                        } catch (e) {
+                            return null;
+                        }
+                        if (info.type !== "regular") return null;
+
+                        let file;
+                        try {
+                            file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+                            file.initWithPath(path);
+                        } catch (e) {
+                            return null;
+                        }
+
+                        const timestamp = d.endTime || d.startTime || info.lastModified || 0;
+                        return {
+                            id: `history_${path}_${timestamp}`,
+                            filename: name,
+                            size: info.size || Number(d.target?.size) || 0,
+                            status: "completed",
+                            url: Services.io.newFileURI(file).spec,
+                            contentType,
+                            timestamp,
+                            targetPath: path,
+                            file,
+                            raw: d,
+                            historyRaw: d
+                        };
+                    }));
+                    items.push(...batch.filter(Boolean));
+                }
+
+                return items;
+            } catch (e) {
+                return [];
+            }
+        }
+
+        _downloadsRootPath() {
             const getDir = (key) => {
                 try {
                     return Services.dirsvc.get(key, Ci.nsIFile);
@@ -403,20 +593,22 @@
             }
             if (!downloadsDir) {
                 console.error("ZenLibrary: Could not find Downloads directory");
-                return [];
+                return "";
             }
 
-            const root = downloadsDir.path;
+            return downloadsDir.path;
+        }
+
+        async _scan(onProgress = null, seedItems = []) {
+            const root = this._downloadsRootPath();
+            if (!root) return [];
             if (!(await IOUtils.exists(root))) {
                 console.error("ZenLibrary: Downloads directory does not exist:", root);
                 return [];
             }
 
-            const IMAGE_EXTS = ZenLibraryMedia.IMAGE_EXTS;
-            const VIDEO_EXTS = ZenLibraryMedia.VIDEO_EXTS;
-            const AUDIO_EXTS = ZenLibraryMedia.AUDIO_EXTS;
-
-            const mediaFiles = [];
+            const mediaFiles = Array.isArray(seedItems) ? seedItems.slice() : [];
+            const seenPaths = new Set(mediaFiles.map(item => this._pathKey(item.targetPath)).filter(Boolean));
             // Breadth-first with an explicit queue rather than recursion, so the depth cap
             // is a property of the traversal instead of the call stack, and so a directory
             // that fails to read cannot abandon its siblings.
@@ -443,16 +635,15 @@
                         }
 
                         if (info.type === "directory") {
-                            next.push(path);
-                            return null;
+                            return {
+                                type: "directory",
+                                path,
+                                timestamp: info.lastModified || info.creationTime || 0
+                            };
                         }
 
-                        const ext = name.split(".").pop().toLowerCase();
-                        let contentType = "";
-                        if (IMAGE_EXTS.includes(ext)) contentType = "image/" + (ext === "jpg" ? "jpeg" : ext);
-                        else if (VIDEO_EXTS.includes(ext)) contentType = "video/" + ext;
-                        else if (AUDIO_EXTS.includes(ext)) contentType = "audio/" + ext;
-                        else return null;
+                        const contentType = this._mediaContentType(name);
+                        if (!contentType || seenPaths.has(this._pathKey(path))) return null;
 
                         // nsIFile is still what the drag path and the cover reader want, but
                         // it is now built from a path already known to be a file, so none of
@@ -475,31 +666,54 @@
                         // for a build without mozSetDataAt, and the card's pointerdown
                         // handler covers that.
                         return {
-                            id,
-                            filename: name,
-                            size: info.size || 0,
-                            status: "completed",
-                            url: Services.io.newFileURI(file).spec,
-                            contentType,
+                            type: "media",
                             timestamp: modified,
-                            targetPath: path,
-                            file,
-                            raw: { target: { path }, lastModified: modified }
+                            item: {
+                                id,
+                                filename: name,
+                                size: info.size || 0,
+                                status: "completed",
+                                url: Services.io.newFileURI(file).spec,
+                                contentType,
+                                timestamp: modified,
+                                targetPath: path,
+                                file,
+                                raw: { target: { path }, lastModified: modified }
+                            }
                         };
                     };
 
                     // Stat in chunks rather than one Promise.all over the whole directory:
                     // a Downloads folder with thousands of files would otherwise queue that
                     // many concurrent stats at once.
-                    for (let i = 0; i < children.length; i += 64) {
-                        const batch = await Promise.all(children.slice(i, i + 64).map(inspectChild));
-                        mediaFiles.push(...batch.filter(Boolean));
+                    const entries = [];
+                    for (let i = 0; i < children.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
+                        const batch = await Promise.all(children.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(inspectChild));
+                        entries.push(...batch.filter(Boolean));
+                    }
+
+                    entries.sort((a, b) => b.timestamp - a.timestamp);
+                    const found = [];
+                    for (const entry of entries) {
+                        if (entry.type === "directory") {
+                            next.push(entry.path);
+                        } else if (entry.item) {
+                            found.push(entry.item);
+                        }
+                    }
+
+                    if (found.length) {
+                        mediaFiles.push(...found);
+                        for (const item of found) {
+                            seenPaths.add(this._pathKey(item.targetPath));
+                        }
+                        if (onProgress) onProgress(mediaFiles.slice());
                     }
                 }
                 level = next;
             }
 
-            return mediaFiles.sort((a, b) => b.timestamp - a.timestamp);
+            return mediaFiles;
         }
 
         renderList(downloads) {
@@ -508,6 +722,8 @@
             // never gets its dragend — so the arm/disarm pair has to be balanced here instead.
             this._disarmDragCancel();
             document.documentElement.removeAttribute("zen-library-dragging");
+            this._clearPendingCoverJobs();
+            this._coverListeners.clear();
             this._disconnectLazyObservers();
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
@@ -556,9 +772,7 @@
                 return;
             }
 
-            // Sort by TS. The scanner also returns sorted data, but keep this here for
-            // cached/renamed/deleted paths that may update the list outside a full scan.
-            mediaItems.sort((a, b) => b.timestamp - a.timestamp);
+            const renderToken = this._renderToken;
             const visibleLimit = Math.min(this._visibleLimit || ZenLibraryMedia.INITIAL_RENDER_LIMIT, mediaItems.length);
             const visibleItems = mediaItems.slice(0, visibleLimit);
 
@@ -797,17 +1011,13 @@
 
                         // Only try extraction if we haven't failed before (cachedCover would be null if failed)
                         if (cachedCover === undefined) {
-                            const updateCover = async () => {
-                                const coverUrl = await this._extractCover(item.file);
-                                this._coverCache.set(item.id, coverUrl);
-                                if (coverUrl) {
-                                    const placeholder = audioIconContainer.querySelector(".placeholder-icon");
-                                    if (placeholder) {
-                                        placeholder.replaceWith(this.el("img", { src: coverUrl, className: "cover-art" }));
-                                    }
+                            this._queueCover(item, renderToken, (coverUrl) => {
+                                if (!audioIconContainer.isConnected) return;
+                                const placeholder = audioIconContainer.querySelector(".placeholder-icon");
+                                if (placeholder) {
+                                    placeholder.replaceWith(this.el("img", { src: coverUrl, className: "cover-art" }));
                                 }
-                            };
-                            updateCover();
+                            });
                         }
                     }
 
@@ -902,7 +1112,7 @@
                         media.src = media.dataset.src;
                     }
                 }
-            }, { root: this._container, rootMargin: "500px 0px" });
+            }, { root: this._container, rootMargin: ZenLibraryMedia.MEDIA_PREVIEW_ROOT_MARGIN });
             this._previewObserver.observe(el);
         }
 
@@ -1357,10 +1567,17 @@
 
         // [audit] LEAK-1 — every cover-art blob: URL and cached Gecko File is released here; without it they were pinned for the window's lifetime.
         destroy() {
+            this._destroyed = true;
             try { this._stopCurrentAudio(); } catch (e) { }
             this._disarmDragCancel();
             this._disarmContextMenuSuppress();
             document.documentElement.removeAttribute("zen-library-dragging");
+            if (this._progressiveRenderFrame) {
+                cancelAnimationFrame(this._progressiveRenderFrame);
+                this._progressiveRenderFrame = 0;
+            }
+            this._progressiveScanItems = null;
+            this._clearPendingCoverJobs();
             this._disconnectLazyObservers();
             // Lives in mainPopupSet, outside anything the panel tears down itself.
             document.getElementById("zen-media-context-menu")?.remove();
