@@ -17,6 +17,9 @@
         static AUDIO_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "m4b", "m4p", "wma", "alac", "amr", "aiff", "aif", "caf", "oga", "spx", "mid", "midi"];
         static INITIAL_RENDER_LIMIT = 36;
         static RENDER_BATCH_SIZE = 36;
+        static SCAN_BATCH_SIZE = 32;
+        static COVER_CONCURRENCY = 2;
+        static MEDIA_PREVIEW_ROOT_MARGIN = "220px 0px";
 
         constructor(library) {
             this.library = library;
@@ -27,6 +30,9 @@
             this._currentAudio = null;
             this._playingId = null;
             this._coverCache = new Map();
+            this._pendingCovers = new Set();
+            this._coverQueue = [];
+            this._activeCoverJobs = 0;
             this._fileCache = new Map(); // Cache for Gecko File objects
 
             // [audit] PERF-1 — the scan cache. See fetchDownloads().
@@ -52,6 +58,7 @@
             this._contextMenuSuppressTimer = null;
             this._suppressContextMenuUntil = 0;
             this._suppressBrowser = null;
+            this._destroyed = false;
         }
 
         // [audit] LEAK-1 — one place that mints blob URLs, so one place has to remember them.
@@ -59,6 +66,55 @@
             const url = URL.createObjectURL(blob);
             this._objectUrls.add(url);
             return url;
+        }
+
+        _queueCover(item, token, onCover) {
+            if (!item?.file || this._coverCache.has(item.id) || this._pendingCovers.has(item.id)) return;
+
+            const job = { item, token, onCover };
+            this._pendingCovers.add(item.id);
+            this._coverQueue.push(job);
+            this._drainCoverQueue();
+        }
+
+        _drainCoverQueue() {
+            while (this._activeCoverJobs < ZenLibraryMedia.COVER_CONCURRENCY && this._coverQueue.length) {
+                const job = this._coverQueue.shift();
+                this._activeCoverJobs++;
+                this._extractCover(job.item.file)
+                    .then(coverUrl => {
+                        if (this._destroyed) {
+                            if (coverUrl) {
+                                try { URL.revokeObjectURL(coverUrl); } catch (e) { }
+                                this._objectUrls.delete(coverUrl);
+                            }
+                            return;
+                        }
+                        this._coverCache.set(job.item.id, coverUrl || null);
+                        if (
+                            coverUrl &&
+                            job.token === this._renderToken &&
+                            this.library?.activeTab === "media"
+                        ) {
+                            job.onCover?.(coverUrl);
+                        }
+                    })
+                    .catch(() => {
+                        this._coverCache.set(job.item.id, null);
+                    })
+                    .finally(() => {
+                        this._pendingCovers.delete(job.item.id);
+                        this._activeCoverJobs--;
+                        this._drainCoverQueue();
+                    });
+            }
+        }
+
+        _clearPendingCoverJobs() {
+            for (const job of this._coverQueue) {
+                this._pendingCovers.delete(job.item.id);
+            }
+            this._coverQueue.length = 0;
         }
 
         async copyFile(item) {
@@ -81,7 +137,6 @@
 
                 const clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
                 clipboard.setData(transferable, null, Ci.nsIClipboard.kGlobalClipboard);
-
             } catch (err) {
                 console.error("[MEDIA] Failed to copy file:", err);
             }
@@ -132,6 +187,7 @@
         }
 
         render() {
+            this._destroyed = false;
             // Main wrapper
             const wrapper = this.el("div", {
                 className: "library-list-wrapper"
@@ -492,8 +548,8 @@
                     // Stat in chunks rather than one Promise.all over the whole directory:
                     // a Downloads folder with thousands of files would otherwise queue that
                     // many concurrent stats at once.
-                    for (let i = 0; i < children.length; i += 64) {
-                        const batch = await Promise.all(children.slice(i, i + 64).map(inspectChild));
+                    for (let i = 0; i < children.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
+                        const batch = await Promise.all(children.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(inspectChild));
                         mediaFiles.push(...batch.filter(Boolean));
                     }
                 }
@@ -509,6 +565,7 @@
             // never gets its dragend — so the arm/disarm pair has to be balanced here instead.
             this._disarmDragCancel();
             document.documentElement.removeAttribute("zen-library-dragging");
+            this._clearPendingCoverJobs();
             this._disconnectLazyObservers();
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
@@ -534,14 +591,12 @@
                 return true;
             });
 
-            // Update count
+            // The panel width follows the filtered count (calculateMediaWidth). Width only —
+            // a full update() here re-entered the section render and could remount the grid.
             const prevCount = this._itemCount;
             this._itemCount = mediaItems.length;
             window.gZenLibraryMediaCount = this._itemCount;
-
-            if (this._itemCount !== prevCount) {
-                if (this.library.update) this.library.update();
-            }
+            if (this._itemCount !== prevCount) this.library.syncWidth?.();
 
             if (mediaItems.length === 0) {
                 this._container.innerHTML = "";
@@ -562,6 +617,7 @@
             // Sort by TS. The scanner also returns sorted data, but keep this here for
             // cached/renamed/deleted paths that may update the list outside a full scan.
             mediaItems.sort((a, b) => b.timestamp - a.timestamp);
+            const renderToken = this._renderToken;
             const visibleLimit = Math.min(this._visibleLimit || ZenLibraryMedia.INITIAL_RENDER_LIMIT, mediaItems.length);
             const visibleItems = mediaItems.slice(0, visibleLimit);
 
@@ -583,17 +639,7 @@
                 columns.push(col);
             }
 
-            // Smooth vertical scrolling
-            grid.onwheel = (e) => {
-                if (e.deltaY !== 0) {
-                    e.preventDefault();
-                    if (e.deltaMode === 1) {
-                        grid.scrollBy({ top: e.deltaY * 37.5, behavior: "smooth" });
-                    } else {
-                        grid.scrollTop += e.deltaY * 2.5;
-                    }
-                }
-            };
+            // No wheel handler: .media-grid is an ordinary vertical scroller, so native (smooth, APZ) scrolling applies like every other list.
 
             visibleItems.forEach((item, index) => {
                 const ext = item.filename.split('.').pop().toLowerCase();
@@ -810,17 +856,13 @@
 
                         // Only try extraction if we haven't failed before (cachedCover would be null if failed)
                         if (cachedCover === undefined) {
-                            const updateCover = async () => {
-                                const coverUrl = await this._extractCover(item.file);
-                                this._coverCache.set(item.id, coverUrl);
-                                if (coverUrl) {
-                                    const placeholder = audioIconContainer.querySelector(".placeholder-icon");
-                                    if (placeholder) {
-                                        placeholder.replaceWith(this.el("img", { src: coverUrl, className: "cover-art" }));
-                                    }
+                            this._queueCover(item, renderToken, (coverUrl) => {
+                                if (!audioIconContainer.isConnected) return;
+                                const placeholder = audioIconContainer.querySelector(".placeholder-icon");
+                                if (placeholder) {
+                                    placeholder.replaceWith(this.el("img", { src: coverUrl, className: "cover-art" }));
                                 }
-                            };
-                            updateCover();
+                            });
                         }
                     }
 
@@ -915,7 +957,7 @@
                         media.src = media.dataset.src;
                     }
                 }
-            }, { root: this._container, rootMargin: "500px 0px" });
+            }, { root: this._container, rootMargin: ZenLibraryMedia.MEDIA_PREVIEW_ROOT_MARGIN });
             this._previewObserver.observe(el);
         }
 
@@ -1364,22 +1406,21 @@
             });
         }
 
-        formatBytes(bytes, decimals = 2) {
-            if (!+bytes || bytes === 0) return "0 Bytes";
-            const k = 1024;
-            const dm = decimals < 0 ? 0 : decimals;
-            const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        formatBytes(bytes) {
+            return window.ZenLibraryUtil.formatBytes(bytes);
         }
 
         // [audit] LEAK-1 — every cover-art blob: URL and cached Gecko File is released here; without it they were pinned for the window's lifetime.
         destroy() {
+            this._destroyed = true;
             try { this._stopCurrentAudio(); } catch (e) { }
             this._disarmDragCancel();
             this._disarmContextMenuSuppress();
             document.documentElement.removeAttribute("zen-library-dragging");
+            this._clearPendingCoverJobs();
             this._disconnectLazyObservers();
+            // Lives in mainPopupSet, outside anything the panel tears down itself.
+            document.getElementById("zen-media-context-menu")?.remove();
 
             for (const url of this._objectUrls) {
                 try { URL.revokeObjectURL(url); } catch (e) { }
