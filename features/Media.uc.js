@@ -20,8 +20,6 @@
         static SCAN_BATCH_SIZE = 32;
         static COVER_CONCURRENCY = 2;
         static MEDIA_PREVIEW_ROOT_MARGIN = "220px 0px";
-        static DISK_CACHE_VERSION = 1;
-        static DISK_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
         constructor(library) {
             this.library = library;
@@ -42,9 +40,9 @@
             this._scanCache = null;
             this._scanAt = 0;
             this._scanPromise = null;
-            this._diskCacheLoaded = false;
-            this._scanCacheFromDisk = false;
             this._lastScanRoot = "";
+            this._progressiveScanItems = null;
+            this._progressiveRenderFrame = 0;
             this._renderToken = 0;
             this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
             this._previewObserver = null;
@@ -131,6 +129,23 @@
             this._coverQueue.length = 0;
         }
 
+        _renderProgressive(items, token, container) {
+            this._progressiveScanItems = items;
+            if (this._progressiveRenderFrame) return;
+
+            this._progressiveRenderFrame = requestAnimationFrame(() => {
+                this._progressiveRenderFrame = 0;
+                if (!this._canRender(token, container)) return;
+                if (!this._progressiveScanItems?.length) return;
+
+                const loading = container.querySelector(".empty-state");
+                if (loading) loading.remove();
+                this.renderList(this._progressiveScanItems);
+                this.library.enterContent(container);
+                container.classList.add("scrollbar-visible");
+            });
+        }
+
         async copyFile(item) {
             try {
                 if (!item.file || !item.file.exists()) return;
@@ -214,17 +229,20 @@
             // Modules outlive a close/open cycle, so a limit paged up in a previous
             // session would otherwise render every card the user ever scrolled to.
             this._visibleLimit = ZenLibraryMedia.INITIAL_RENDER_LIMIT;
+            this._progressiveScanItems = null;
+            if (this._progressiveRenderFrame) {
+                cancelAnimationFrame(this._progressiveRenderFrame);
+                this._progressiveRenderFrame = 0;
+            }
 
             const startLoading = () => {
-                this.fetchDownloads().then(downloads => {
+                this.fetchDownloads({
+                    onProgress: (items) => this._renderProgressive(items, token, container)
+                }).then(downloads => {
                     if (!this._canRender(token, container)) return;
                     const l = container.querySelector(".empty-state");
                     if (l) l.remove();
                     this.renderList(downloads);
-                    if (this._scanCacheFromDisk) {
-                        this.refreshDownloadsInBackground(token, container)
-                            .catch(e => console.warn("[ZenLibrary Media] Background refresh failed:", e));
-                    }
                     if (!this._canRender(token, container)) return;
                     this.library.enterContent(container);
                     setTimeout(() => {
@@ -239,10 +257,6 @@
                 this.renderList(this._scanCache);
                 this.library.enterContent(container);
                 container.classList.add("scrollbar-visible");
-                if (this._scanCacheFromDisk) {
-                    this.refreshDownloadsInBackground(token, container)
-                        .catch(e => console.warn("[ZenLibrary Media] Background refresh failed:", e));
-                }
                 return wrapper;
             }
 
@@ -443,32 +457,17 @@
         // A newly downloaded file should still show up promptly, so this stays short.
         static CACHE_MS = 15000;
 
-        async fetchDownloads({ force = false } = {}) {
+        async fetchDownloads({ force = false, onProgress = null } = {}) {
             if (!force && this._scanCache && Date.now() - this._scanAt < ZenLibraryMedia.CACHE_MS) {
                 return this._scanCache;
-            }
-            if (!force && !this._scanCache && !this._diskCacheLoaded) {
-                this._diskCacheLoaded = true;
-                const cached = await this._readDiskCache(this._downloadsRootPath());
-                if (cached?.files?.length) {
-                    this._scanCache = cached.files;
-                    this._scanAt = cached.createdAt || Date.now();
-                    this._scanCacheFromDisk = true;
-                    this._lastScanRoot = cached.root || "";
-                    return this._scanCache;
-                }
             }
             // Collapse concurrent callers onto one scan rather than starting several.
             if (this._scanPromise) return this._scanPromise;
 
-            this._scanPromise = this._scan()
+            this._scanPromise = this._scan(onProgress)
                 .then(files => {
                     this._scanCache = files;
                     this._scanAt = Date.now();
-                    this._scanCacheFromDisk = false;
-                    this._writeDiskCache(files).catch(e =>
-                        console.warn("[ZenLibrary Media] Failed to write media cache:", e)
-                    );
                     return files;
                 })
                 .catch(e => {
@@ -478,84 +477,6 @@
                 .finally(() => { this._scanPromise = null; });
 
             return this._scanPromise;
-        }
-
-        async refreshDownloadsInBackground(token, container) {
-            const previousIds = new Set((this._scanCache || []).map(item => item.id));
-            const files = await this.fetchDownloads({ force: true });
-            if (!this._canRender(token, container)) return;
-
-            const changed = files.length !== previousIds.size ||
-                files.some(item => !previousIds.has(item.id));
-            if (changed) this.renderList(files);
-        }
-
-        _cachePath() {
-            return PathUtils.join(PathUtils.profileDir, "zen-library-media-cache-v1.json");
-        }
-
-        _itemFromCache(entry) {
-            if (!entry?.targetPath || !entry.filename || !entry.id) return null;
-            try {
-                const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-                file.initWithPath(entry.targetPath);
-                return {
-                    id: entry.id,
-                    filename: entry.filename,
-                    size: Number(entry.size) || 0,
-                    status: "completed",
-                    url: entry.url || Services.io.newFileURI(file).spec,
-                    contentType: String(entry.contentType || ""),
-                    timestamp: Number(entry.timestamp) || 0,
-                    targetPath: entry.targetPath,
-                    file,
-                    raw: { target: { path: entry.targetPath }, lastModified: Number(entry.timestamp) || 0 },
-                    cached: true
-                };
-            } catch (e) {
-                return null;
-            }
-        }
-
-        _serializeCacheItem(item) {
-            return {
-                id: item.id,
-                filename: item.filename,
-                size: item.size,
-                url: item.url,
-                contentType: item.contentType,
-                timestamp: item.timestamp,
-                targetPath: item.targetPath
-            };
-        }
-
-        async _readDiskCache(expectedRoot = "") {
-            try {
-                const raw = await IOUtils.readUTF8(this._cachePath());
-                const parsed = JSON.parse(raw);
-                if (parsed?.version !== ZenLibraryMedia.DISK_CACHE_VERSION) return null;
-                if (!parsed.createdAt || Date.now() - parsed.createdAt > ZenLibraryMedia.DISK_CACHE_MAX_AGE_MS) return null;
-                if (expectedRoot && parsed.root !== expectedRoot) return null;
-                if (!Array.isArray(parsed.files)) return null;
-
-                const files = parsed.files
-                    .map(entry => this._itemFromCache(entry))
-                    .filter(Boolean)
-                    .sort((a, b) => b.timestamp - a.timestamp);
-                return { root: String(parsed.root || ""), createdAt: parsed.createdAt, files };
-            } catch (e) {
-                return null;
-            }
-        }
-
-        async _writeDiskCache(files) {
-            const payload = {
-                version: ZenLibraryMedia.DISK_CACHE_VERSION,
-                root: this._lastScanRoot,
-                createdAt: Date.now(),
-                files: (files || []).map(item => this._serializeCacheItem(item))
-            };
-            await IOUtils.writeUTF8(this._cachePath(), JSON.stringify(payload));
         }
 
         _downloadsRootPath() {
@@ -581,7 +502,7 @@
             return downloadsDir.path;
         }
 
-        async _scan() {
+        async _scan(onProgress = null) {
             const root = this._downloadsRootPath();
             if (!root) return [];
             this._lastScanRoot = root;
@@ -671,7 +592,13 @@
                     // many concurrent stats at once.
                     for (let i = 0; i < children.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
                         const batch = await Promise.all(children.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(inspectChild));
-                        mediaFiles.push(...batch.filter(Boolean));
+                        const found = batch.filter(Boolean);
+                        if (found.length) {
+                            mediaFiles.push(...found);
+                            if (onProgress) {
+                                onProgress(mediaFiles.slice().sort((a, b) => b.timestamp - a.timestamp));
+                            }
+                        }
                     }
                 }
                 level = next;
@@ -1407,8 +1334,6 @@
                     for (const cache of [this._coverCache, this._fileCache]) {
                         if (cache.has(oldId)) { cache.set(item.id, cache.get(oldId)); cache.delete(oldId); }
                     }
-                    this._writeDiskCache(this._scanCache || [])
-                        .catch(e => console.warn("[ZenLibrary Media] Failed to update media cache after rename:", e));
                     if (this._playingId === oldId) this._playingId = item.id;
                     if (card) {
                         card.dataset.id = item.id;
@@ -1428,8 +1353,6 @@
                     if (item.file.exists()) item.file.remove(false);
                     if (this._scanCache) {
                         this._scanCache = this._scanCache.filter(d => d.id !== item.id);
-                        this._writeDiskCache(this._scanCache)
-                            .catch(e => console.warn("[ZenLibrary Media] Failed to update media cache after delete:", e));
                     }
                     this._itemCount = Math.max(0, (this._itemCount || 1) - 1);
                     window.gZenLibraryMediaCount = this._itemCount;
@@ -1543,6 +1466,11 @@
             this._disarmDragCancel();
             this._disarmContextMenuSuppress();
             document.documentElement.removeAttribute("zen-library-dragging");
+            if (this._progressiveRenderFrame) {
+                cancelAnimationFrame(this._progressiveRenderFrame);
+                this._progressiveRenderFrame = 0;
+            }
+            this._progressiveScanItems = null;
             this._clearPendingCoverJobs();
             this._disconnectLazyObservers();
             // Lives in mainPopupSet, outside anything the panel tears down itself.
