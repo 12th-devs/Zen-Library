@@ -542,8 +542,11 @@
                         }
 
                         if (info.type === "directory") {
-                            next.push(path);
-                            return null;
+                            return {
+                                type: "directory",
+                                path,
+                                timestamp: info.lastModified || info.creationTime || 0
+                            };
                         }
 
                         const ext = name.split(".").pop().toLowerCase();
@@ -574,29 +577,45 @@
                         // for a build without mozSetDataAt, and the card's pointerdown
                         // handler covers that.
                         return {
-                            id,
-                            filename: name,
-                            size: info.size || 0,
-                            status: "completed",
-                            url: Services.io.newFileURI(file).spec,
-                            contentType,
+                            type: "media",
                             timestamp: modified,
-                            targetPath: path,
-                            file,
-                            raw: { target: { path }, lastModified: modified }
+                            item: {
+                                id,
+                                filename: name,
+                                size: info.size || 0,
+                                status: "completed",
+                                url: Services.io.newFileURI(file).spec,
+                                contentType,
+                                timestamp: modified,
+                                targetPath: path,
+                                file,
+                                raw: { target: { path }, lastModified: modified }
+                            }
                         };
                     };
 
                     // Stat in chunks rather than one Promise.all over the whole directory:
                     // a Downloads folder with thousands of files would otherwise queue that
                     // many concurrent stats at once.
+                    const entries = [];
                     for (let i = 0; i < children.length; i += ZenLibraryMedia.SCAN_BATCH_SIZE) {
                         const batch = await Promise.all(children.slice(i, i + ZenLibraryMedia.SCAN_BATCH_SIZE).map(inspectChild));
-                        const found = batch.filter(Boolean);
-                        if (found.length) {
-                            mediaFiles.push(...found);
-                            if (onProgress) onProgress(mediaFiles.slice());
+                        entries.push(...batch.filter(Boolean));
+                    }
+
+                    entries.sort((a, b) => b.timestamp - a.timestamp);
+                    const found = [];
+                    for (const entry of entries) {
+                        if (entry.type === "directory") {
+                            next.push(entry.path);
+                        } else if (entry.item) {
+                            found.push(entry.item);
                         }
+                    }
+
+                    if (found.length) {
+                        mediaFiles.push(...found);
+                        if (onProgress) onProgress(mediaFiles.slice());
                     }
                 }
                 level = next;
