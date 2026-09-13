@@ -31,6 +31,7 @@
             this._playingId = null;
             this._coverCache = new Map();
             this._pendingCovers = new Set();
+            this._coverListeners = new Map();
             this._coverQueue = [];
             this._activeCoverJobs = 0;
             this._fileCache = new Map(); // Cache for Gecko File objects
@@ -69,9 +70,14 @@
         }
 
         _queueCover(item, token, onCover) {
-            if (!item?.file || this._coverCache.has(item.id) || this._pendingCovers.has(item.id)) return;
+            if (!item?.file || this._coverCache.has(item.id)) return;
 
-            const job = { item, token, onCover };
+            const listeners = this._coverListeners.get(item.id) || [];
+            listeners.push({ token, onCover });
+            this._coverListeners.set(item.id, listeners);
+            if (this._pendingCovers.has(item.id)) return;
+
+            const job = { item };
             this._pendingCovers.add(item.id);
             this._coverQueue.push(job);
             this._drainCoverQueue();
@@ -91,12 +97,13 @@
                             return;
                         }
                         this._coverCache.set(job.item.id, coverUrl || null);
-                        if (
-                            coverUrl &&
-                            job.token === this._renderToken &&
-                            this.library?.activeTab === "media"
-                        ) {
-                            job.onCover?.(coverUrl);
+                        if (coverUrl && this.library?.activeTab === "media") {
+                            const listeners = this._coverListeners.get(job.item.id) || [];
+                            for (const listener of listeners) {
+                                if (listener.token === this._renderToken) {
+                                    listener.onCover?.(coverUrl);
+                                }
+                            }
                         }
                     })
                     .catch(() => {
@@ -104,6 +111,7 @@
                     })
                     .finally(() => {
                         this._pendingCovers.delete(job.item.id);
+                        this._coverListeners.delete(job.item.id);
                         this._activeCoverJobs--;
                         this._drainCoverQueue();
                     });
@@ -113,6 +121,7 @@
         _clearPendingCoverJobs() {
             for (const job of this._coverQueue) {
                 this._pendingCovers.delete(job.item.id);
+                this._coverListeners.delete(job.item.id);
             }
             this._coverQueue.length = 0;
         }
@@ -566,6 +575,7 @@
             this._disarmDragCancel();
             document.documentElement.removeAttribute("zen-library-dragging");
             this._clearPendingCoverJobs();
+            this._coverListeners.clear();
             this._disconnectLazyObservers();
             this._container.innerHTML = "";
             this._container.classList.add("scrollbar-visible");
